@@ -7,7 +7,6 @@
 export interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
-  DEEPSEEK_API_KEY: string;
   OPENROUTER_API_KEY: string;
 }
 
@@ -116,14 +115,14 @@ CORE RULES:
 
   const userMessage = `Context from documentation:\n\n${context}\n\n---\n\nUser Question: ${query}`;
 
-  const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: "deepseek-chat",
+      model: "google/gemma-4-26b-a4b-it",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userMessage },
@@ -197,15 +196,15 @@ async function handleChat(
       sources: [],
       input_tokens: 0,
       output_tokens: 0,
-      engine: "gemini-embedding-2",
+      engine: "gemini-embedding-2 + gemma-4",
     });
   }
 
-  // 3. Generate answer with DeepSeek
+  // 3. Generate answer with Gemma 4 via OpenRouter
   let answer: string, inputTokens: number, outputTokens: number;
   try {
     ({ answer, inputTokens, outputTokens } = await generateAnswer(
-      env.DEEPSEEK_API_KEY,
+      env.OPENROUTER_API_KEY,
       query,
       chunks
     ));
@@ -221,7 +220,7 @@ async function handleChat(
     sources: [...new Set(chunks.map((c) => c.source))],
     input_tokens: inputTokens,
     output_tokens: outputTokens,
-    engine: "gemini-embedding-2",
+    engine: "gemini-embedding-2 + gemma-4",
     rich_chunks: chunks.map((c) => c.content),
   });
 }
