@@ -11,21 +11,23 @@
 
   // ─── Load marked.js on demand ────────────────────────────────────────────────
   function loadMarked(cb) {
-    if (window.marked) { configureMarked(); cb(); return; }
+    if (window.marked) { cb(); return; }
     var s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
-    s.onload = function () { configureMarked(); cb(); };
+    s.onload = cb;
+    s.onerror = cb; // still init widget even if marked fails to load
     document.head.appendChild(s);
   }
 
-  function configureMarked() {
-    var renderer = new window.marked.Renderer();
-    var origLink = renderer.link.bind(renderer);
-    renderer.link = function (href, title, text) {
-      var html = origLink(href, title, text);
-      return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
-    };
-    window.marked.use({ renderer: renderer, breaks: true, gfm: true });
+  function parseMarkdown(text) {
+    try {
+      if (!window.marked) return text.replace(/\n/g, '<br>');
+      var html = window.marked.parse(text, { breaks: true, gfm: true });
+      // open all links in new tab without touching the marked Renderer API
+      return html.replace(/<a\s/gi, '<a target="_blank" rel="noopener noreferrer" ');
+    } catch (e) {
+      return text.replace(/\n/g, '<br>');
+    }
   }
 
   // ─── Styles (scoped to #momo-widget-root, !important on layout-critical props) ─
@@ -542,7 +544,7 @@
           });
         }
 
-        var html = window.marked ? window.marked.parse(cleanAnswer) : cleanAnswer.replace(/\n/g, '<br>');
+        var html = parseMarkdown(cleanAnswer);
         appendMsg('ai', html, data.sources || [], images);
       } else {
         appendMsg('ai', '<strong>Error:</strong> ' + (data.error || 'The AI service encountered an issue.'));
