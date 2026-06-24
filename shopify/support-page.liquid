@@ -293,7 +293,7 @@
           <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2" fill="white" stroke="none"/></svg>
         </button>
       </div>
-      <div class="momo-footer-note">Powered by Load Controls RAG Engine · DeepSeek LLM · Gemini Embedding 2</div>
+      <div class="momo-footer-note">Powered by Load Controls RAG Engine · Gemma 4 · Gemini Embedding 2</div>
     </div>
   </div>
 </div>
@@ -303,16 +303,16 @@
   var API_URL = 'https://rag-worker.development-abacusdigital.workers.dev';
   var ASSET   = 'https://load-chat-ruddy.vercel.app';
 
-  var history    = document.getElementById('momo-history');
-  var input      = document.getElementById('momo-page-input');
-  var sendBtn    = document.getElementById('momo-page-send');
-  var sdot       = document.getElementById('momo-sdot');
-  var slabel     = document.getElementById('momo-slabel');
-  var hdrAvatar  = document.getElementById('momo-hdr-avatar');
-  var welcomeRow = document.getElementById('momo-welcome-row');
-  var isTyping   = false;
+  var chatHistory = document.getElementById('momo-history');
+  var input       = document.getElementById('momo-page-input');
+  var sendBtn     = document.getElementById('momo-page-send');
+  var sdot        = document.getElementById('momo-sdot');
+  var slabel      = document.getElementById('momo-slabel');
+  var hdrAvatar   = document.getElementById('momo-hdr-avatar');
+  var welcomeRow  = document.getElementById('momo-welcome-row');
+  var isTyping    = false;
 
-  marked.setOptions({ headerIds: false, mangle: false, breaks: true, gfm: true });
+  marked.use({ breaks: true, gfm: true });
 
   function setStatus(state) {
     if (state === 'thinking') {
@@ -373,8 +373,8 @@
       '</div>';
 
     row.innerHTML = role === 'ai' ? avatarHtml + contentHtml : contentHtml;
-    history.appendChild(row);
-    history.scrollTop = history.scrollHeight;
+    chatHistory.appendChild(row);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
   }
 
   function showThinking() {
@@ -386,8 +386,8 @@
       '<div class="momo-row-content"><div class="momo-row-bubble">' +
         '<div class="momo-dots"><span></span><span></span><span></span></div>' +
       '</div></div>';
-    history.appendChild(row);
-    history.scrollTop = history.scrollHeight;
+    chatHistory.appendChild(row);
+    chatHistory.scrollTop = chatHistory.scrollHeight;
   }
 
   function hideThinking() {
