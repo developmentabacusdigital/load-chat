@@ -1,0 +1,20 @@
+{% comment %}
+  Miss MoMo Chat Widget
+  ─────────────────────
+  Paste this block just before the closing </body> tag in your theme.liquid file.
+  (Online Store → Themes → Edit code → Layout → theme.liquid)
+
+  Optional: override defaults by setting window.MoMoConfig before the script loads.
+    apiUrl      — your Cloudflare Worker URL  (default: production worker)
+    supportPage — path to your full chat page (default: /pages/support)
+    assetBase   — URL where widget assets (GIFs) are hosted
+{% endcomment %}
+
+<script>
+  window.MoMoConfig = {
+    apiUrl:      'https://rag-worker.abhijaydutta123.workers.dev',
+    supportPage: '/pages/ask-miss-momo',
+    assetBase:   'https://load-chat.pages.dev'
+  };
+</script>
+<script src="https://load-chat.pages.dev/widget.js" defer></script>

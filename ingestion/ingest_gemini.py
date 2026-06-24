@@ -4,8 +4,6 @@ import re
 import httpx
 from pathlib import Path
 from dotenv import load_dotenv
-from google import genai
-from google.genai import types
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.base_models import InputFormat
@@ -17,17 +15,14 @@ sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 load_dotenv()
 
 # Configuration
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 DOCUMENTS_DIR = Path(os.getenv("DOCUMENTS_DIR", "./Documents"))
-EMBED_MODEL = "gemini-embedding-2-preview"
+EMBED_MODEL = "google/gemini-embedding-2"
 
-if not GOOGLE_API_KEY:
-    raise ValueError("GOOGLE_API_KEY is missing from .env")
-
-# Initialize Google client
-client = genai.Client(api_key=GOOGLE_API_KEY)
+if not OPENROUTER_API_KEY:
+    raise ValueError("OPENROUTER_API_KEY is missing from .env")
 
 # Configure Docling with picture/figure image extraction enabled
 pipeline_options = PdfPipelineOptions()
@@ -91,19 +86,20 @@ def chunk_markdown(md_text: str, chunk_size: int = 3000, overlap: int = 200) -> 
 
 
 def embed_text(text: str) -> list[float]:
-    """
-    Generates 3072-dim embeddings using Gemini Embedding 2 Preview.
-    Note: base64 image data in chunks is stripped before embedding to save tokens.
-    """
-    # Strip base64 data URIs from text before embedding (they're not semantic)
+    """Generates 3072-dim embeddings via OpenRouter → Gemini Embedding 2."""
     clean_text = re.sub(r'data:image/[^;]+;base64,[A-Za-z0-9+/=]+', '[IMAGE]', text)
 
-    result = client.models.embed_content(
-        model=EMBED_MODEL,
-        contents=clean_text,
-        config=types.EmbedContentConfig(task_type="RETRIEVAL_DOCUMENT")
+    resp = httpx.post(
+        "https://openrouter.ai/api/v1/embeddings",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={"model": EMBED_MODEL, "input": clean_text},
+        timeout=30.0,
     )
-    return result.embeddings[0].values
+    resp.raise_for_status()
+    return resp.json()["data"][0]["embedding"]
 
 
 def save_to_supabase(chunks: list[str], source_name: str):

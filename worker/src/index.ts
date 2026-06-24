@@ -8,7 +8,7 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   DEEPSEEK_API_KEY: string;
-  GOOGLE_API_KEY: string;
+  OPENROUTER_API_KEY: string;
 }
 
 const CORS_HEADERS = {
@@ -24,26 +24,25 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
-// ── Embed query via Gemini Embedding 2 API (3072-dim) ──
-async function embedQueryGemini(apiKey: string, text: string): Promise<number[]> {
-  const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2-preview:embedContent?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model: "models/gemini-embedding-2-preview",
-        content: { parts: [{ text }] },
-        taskType: "RETRIEVAL_QUERY",
-      }),
-    }
-  );
+// ── Embed query via OpenRouter → Gemini Embedding 2 (3072-dim) ──
+async function embedQuery(apiKey: string, text: string): Promise<number[]> {
+  const response = await fetch("https://openrouter.ai/api/v1/embeddings", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: "google/gemini-embedding-2",
+      input: text,
+    }),
+  });
   if (!response.ok) {
     const err = await response.text();
-    throw new Error(`Gemini Embed error: ${response.status} ${err}`);
+    throw new Error(`OpenRouter embed error: ${response.status} ${err}`);
   }
-  const data = (await response.json()) as { embedding: { values: number[] } };
-  return data.embedding.values;
+  const data = (await response.json()) as { data: { embedding: number[] }[] };
+  return data.data[0].embedding;
 }
 
 // ── Retrieve relevant chunks from Supabase ──
@@ -163,15 +162,15 @@ async function handleChat(
     return jsonResponse({ error: "Missing 'query' field in request body" }, 400);
   }
 
-  // 1. Embed the query with Gemini 2 (3072d)
+  // 1. Embed the query via OpenRouter → Gemini Embedding 2 (3072d)
   let queryEmbedding: number[];
   try {
-    queryEmbedding = await embedQueryGemini(env.GOOGLE_API_KEY, query);
-    console.log("[Step 1] Gemini embed OK, dims:", queryEmbedding.length);
+    queryEmbedding = await embedQuery(env.OPENROUTER_API_KEY, query);
+    console.log("[Step 1] OpenRouter embed OK, dims:", queryEmbedding.length);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    console.error("[Step 1 FAILED] Gemini embed error:", msg);
-    throw new Error(`Gemini embed failed: ${msg}`);
+    console.error("[Step 1 FAILED] OpenRouter embed error:", msg);
+    throw new Error(`Embed failed: ${msg}`);
   }
 
   // 2. Retrieve relevant chunks from documents_gemini table
