@@ -11,11 +11,21 @@
 
   // ─── Load marked.js on demand ────────────────────────────────────────────────
   function loadMarked(cb) {
-    if (window.marked) { cb(); return; }
+    if (window.marked) { configureMarked(); cb(); return; }
     var s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/marked/marked.min.js';
-    s.onload = cb;
+    s.onload = function () { configureMarked(); cb(); };
     document.head.appendChild(s);
+  }
+
+  function configureMarked() {
+    var renderer = new window.marked.Renderer();
+    var origLink = renderer.link.bind(renderer);
+    renderer.link = function (href, title, text) {
+      var html = origLink(href, title, text);
+      return html.replace('<a ', '<a target="_blank" rel="noopener noreferrer" ');
+    };
+    window.marked.use({ renderer: renderer, breaks: true, gfm: true });
   }
 
   // ─── Styles (scoped to #momo-widget-root, !important on layout-critical props) ─
@@ -124,6 +134,8 @@
     .momo-bubble-text li { margin: 0 0 4px 0 !important; }
     .momo-bubble-text code { background: rgba(0,0,0,0.06) !important; padding: 1px 5px !important; border-radius: 3px !important; font-family: monospace !important; }
     .momo-bubble-text strong { font-weight: 700 !important; }
+    .momo-bubble-text a { color: #C42633 !important; text-decoration: underline !important; font-weight: 600 !important; }
+    .momo-bubble-text a:hover { color: #A51D29 !important; }
     .momo-sources { display: flex !important; flex-wrap: wrap !important; gap: 4px !important; margin: 6px 0 0 0 !important; }
     .momo-badge {
       background: #FCE8E9 !important; color: #C42633 !important; border: 1px solid rgba(196,38,51,0.12) !important;
