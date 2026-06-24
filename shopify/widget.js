@@ -18,28 +18,32 @@
     document.head.appendChild(s);
   }
 
-  // ─── Styles (all prefixed momo- to avoid Shopify conflicts) ─────────────────
+  // ─── Styles (scoped to #momo-widget-root, !important on layout-critical props) ─
   var css = `
     @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700&display=swap');
 
-    #momo-widget-root * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Outfit', sans-serif; }
+    #momo-widget-root *, #momo-widget-root *::before, #momo-widget-root *::after {
+      box-sizing: border-box !important; font-family: 'Outfit', sans-serif !important;
+    }
+    #momo-widget-root img { max-width: none !important; }
 
     /* Bubble */
     #momo-bubble {
-      position: fixed; bottom: 28px; right: 28px; z-index: 99999;
-      width: 64px; height: 64px; border-radius: 50%;
-      background: #C42633; border: none; cursor: pointer;
-      box-shadow: 0 8px 28px rgba(196,38,51,0.45);
-      display: flex; align-items: center; justify-content: center;
-      transition: transform 0.2s, box-shadow 0.2s;
+      all: unset;
+      position: fixed !important; bottom: 28px !important; right: 28px !important; z-index: 99999 !important;
+      width: 64px !important; height: 64px !important; border-radius: 50% !important;
+      background: #C42633 !important; cursor: pointer !important;
+      box-shadow: 0 8px 28px rgba(196,38,51,0.45) !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      transition: transform 0.2s, box-shadow 0.2s !important;
     }
-    #momo-bubble:hover { transform: scale(1.08); box-shadow: 0 12px 36px rgba(196,38,51,0.55); }
-    #momo-bubble svg { width: 28px; height: 28px; fill: #fff; }
+    #momo-bubble:hover { transform: scale(1.08) !important; box-shadow: 0 12px 36px rgba(196,38,51,0.55) !important; }
+    #momo-bubble svg { width: 28px !important; height: 28px !important; fill: #fff !important; }
     #momo-bubble-badge {
-      position: absolute; top: -4px; right: -4px;
-      width: 18px; height: 18px; border-radius: 50%;
-      background: #27A644; border: 2px solid #fff;
-      animation: momo-pulse 2s infinite;
+      position: absolute !important; top: -4px !important; right: -4px !important;
+      width: 18px !important; height: 18px !important; border-radius: 50% !important;
+      background: #27A644 !important; border: 2px solid #fff !important;
+      animation: momo-pulse 2s infinite !important;
     }
     @keyframes momo-pulse {
       0%,100% { box-shadow: 0 0 0 0 rgba(39,166,68,0.5); }
@@ -48,91 +52,94 @@
 
     /* Panel */
     #momo-panel {
-      position: fixed; bottom: 104px; right: 28px; z-index: 99998;
-      width: 380px; height: 540px;
-      background: #fff; border-radius: 20px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.18);
-      border: 1px solid #E8E8ED;
-      display: flex; flex-direction: column; overflow: hidden;
-      transform: scale(0.92) translateY(16px); opacity: 0; pointer-events: none;
-      transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), opacity 0.2s;
-      transform-origin: bottom right;
+      position: fixed !important; bottom: 104px !important; right: 28px !important; z-index: 99998 !important;
+      width: 380px !important; height: 540px !important;
+      background: #fff !important; border-radius: 20px !important;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.18) !important;
+      border: 1px solid #E8E8ED !important;
+      display: flex !important; flex-direction: column !important; overflow: hidden !important;
+      transform: scale(0.92) translateY(16px) !important; opacity: 0 !important; pointer-events: none !important;
+      transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), opacity 0.2s !important;
+      transform-origin: bottom right !important; margin: 0 !important; padding: 0 !important;
     }
     #momo-panel.momo-open {
-      transform: scale(1) translateY(0); opacity: 1; pointer-events: all;
+      transform: scale(1) translateY(0) !important; opacity: 1 !important; pointer-events: all !important;
     }
 
     /* Panel Header */
     .momo-panel-header {
-      background: #C42633; padding: 16px 20px;
-      display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+      background: #C42633 !important; padding: 14px 16px !important;
+      display: flex !important; align-items: center !important; gap: 10px !important; flex-shrink: 0 !important;
+      margin: 0 !important;
     }
     .momo-header-avatar {
-      width: 38px; height: 38px; border-radius: 50%; overflow: hidden;
-      background: rgba(255,255,255,0.15); flex-shrink: 0;
+      width: 38px !important; height: 38px !important; border-radius: 50% !important; overflow: hidden !important;
+      background: rgba(255,255,255,0.15) !important; flex-shrink: 0 !important;
+      margin: 0 !important; padding: 0 !important;
     }
-    .momo-header-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .momo-header-info { flex: 1; }
-    .momo-header-info strong { display: block; color: #fff; font-size: 0.95rem; font-weight: 700; }
-    .momo-header-info span { color: rgba(255,255,255,0.8); font-size: 0.75rem; }
+    .momo-header-avatar img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; }
+    .momo-header-info { flex: 1 !important; min-width: 0 !important; }
+    .momo-header-info strong { display: block !important; color: #fff !important; font-size: 0.92rem !important; font-weight: 700 !important; line-height: 1.2 !important; }
+    .momo-header-info span { color: rgba(255,255,255,0.85) !important; font-size: 0.72rem !important; display: flex !important; align-items: center !important; gap: 4px !important; }
     .momo-status-dot {
-      width: 8px; height: 8px; border-radius: 50%; background: #27A644;
-      display: inline-block; margin-right: 4px;
+      width: 8px !important; height: 8px !important; border-radius: 50% !important; background: #27A644 !important;
+      display: inline-block !important; flex-shrink: 0 !important;
     }
-    .momo-header-actions { display: flex; gap: 6px; }
+    .momo-header-actions { display: flex !important; gap: 6px !important; flex-shrink: 0 !important; }
     .momo-icon-btn {
-      width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer;
-      background: rgba(255,255,255,0.18); display: flex; align-items: center;
-      justify-content: center; transition: background 0.2s; color: #fff;
+      all: unset !important;
+      width: 30px !important; height: 30px !important; border-radius: 50% !important; cursor: pointer !important;
+      background: rgba(255,255,255,0.18) !important;
+      display: flex !important; align-items: center !important; justify-content: center !important;
+      transition: background 0.2s !important;
     }
-    .momo-icon-btn:hover { background: rgba(255,255,255,0.32); }
-    .momo-icon-btn svg { width: 16px; height: 16px; fill: #fff; }
-    .momo-expand-btn svg { stroke: #fff; fill: none; }
+    .momo-icon-btn:hover { background: rgba(255,255,255,0.32) !important; }
+    .momo-icon-btn svg { width: 15px !important; height: 15px !important; display: block !important; }
 
     /* Chat body */
     .momo-chat-body {
-      flex: 1; overflow-y: auto; padding: 20px 16px;
-      display: flex; flex-direction: column; gap: 16px;
-      scroll-behavior: smooth; background: #F9F9FB;
+      flex: 1 !important; overflow-y: auto !important; padding: 16px !important;
+      display: flex !important; flex-direction: column !important; gap: 14px !important;
+      scroll-behavior: smooth !important; background: #F9F9FB !important; margin: 0 !important;
     }
-    .momo-chat-body::-webkit-scrollbar { width: 4px; }
-    .momo-chat-body::-webkit-scrollbar-thumb { background: #D1D1D1; border-radius: 10px; }
+    .momo-chat-body::-webkit-scrollbar { width: 4px !important; }
+    .momo-chat-body::-webkit-scrollbar-thumb { background: #D1D1D1 !important; border-radius: 10px !important; }
 
     /* Messages */
-    .momo-msg { display: flex; gap: 8px; animation: momo-fadeIn 0.25s ease; }
-    .momo-msg.momo-user { flex-direction: row-reverse; }
-    .momo-msg-avatar { width: 32px; height: 32px; border-radius: 50%; overflow: hidden; flex-shrink: 0; align-self: flex-end; }
-    .momo-msg-avatar img { width: 100%; height: 100%; object-fit: cover; }
-    .momo-msg-content { max-width: 82%; display: flex; flex-direction: column; gap: 4px; }
-    .momo-msg.momo-user .momo-msg-content { align-items: flex-end; }
+    .momo-msg { display: flex !important; gap: 8px !important; animation: momo-fadeIn 0.25s ease !important; margin: 0 !important; }
+    .momo-msg.momo-user { flex-direction: row-reverse !important; }
+    .momo-msg-avatar { width: 30px !important; height: 30px !important; border-radius: 50% !important; overflow: hidden !important; flex-shrink: 0 !important; align-self: flex-end !important; }
+    .momo-msg-avatar img { width: 100% !important; height: 100% !important; object-fit: cover !important; display: block !important; }
+    .momo-msg-content { max-width: 82% !important; display: flex !important; flex-direction: column !important; gap: 4px !important; }
+    .momo-msg.momo-user .momo-msg-content { align-items: flex-end !important; }
     .momo-bubble-text {
-      padding: 10px 14px; border-radius: 14px; font-size: 0.875rem; line-height: 1.55;
-      word-break: break-word; white-space: normal;
+      padding: 10px 14px !important; border-radius: 14px !important; font-size: 0.85rem !important; line-height: 1.55 !important;
+      word-break: break-word !important; white-space: normal !important; margin: 0 !important;
     }
-    .momo-msg.momo-user .momo-bubble-text { background: #C42633; color: #fff; border-bottom-right-radius: 3px; }
-    .momo-msg.momo-ai .momo-bubble-text  { background: #fff; color: #1D1D21; border-bottom-left-radius: 3px; box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
-    .momo-bubble-text p { margin-bottom: 8px; }
-    .momo-bubble-text p:last-child { margin-bottom: 0; }
-    .momo-bubble-text ul, .momo-bubble-text ol { margin-left: 16px; margin-bottom: 8px; }
-    .momo-bubble-text li { margin-bottom: 4px; }
-    .momo-bubble-text code { background: rgba(0,0,0,0.06); padding: 1px 5px; border-radius: 3px; font-family: monospace; }
-    .momo-bubble-text strong { font-weight: 700; }
-    .momo-sources { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+    .momo-msg.momo-user .momo-bubble-text { background: #C42633 !important; color: #fff !important; border-bottom-right-radius: 3px !important; }
+    .momo-msg.momo-ai .momo-bubble-text  { background: #fff !important; color: #1D1D21 !important; border-bottom-left-radius: 3px !important; box-shadow: 0 2px 8px rgba(0,0,0,0.06) !important; }
+    .momo-bubble-text p { margin: 0 0 8px 0 !important; }
+    .momo-bubble-text p:last-child { margin-bottom: 0 !important; }
+    .momo-bubble-text ul, .momo-bubble-text ol { margin: 0 0 8px 16px !important; padding: 0 !important; }
+    .momo-bubble-text li { margin: 0 0 4px 0 !important; }
+    .momo-bubble-text code { background: rgba(0,0,0,0.06) !important; padding: 1px 5px !important; border-radius: 3px !important; font-family: monospace !important; }
+    .momo-bubble-text strong { font-weight: 700 !important; }
+    .momo-sources { display: flex !important; flex-wrap: wrap !important; gap: 4px !important; margin: 6px 0 0 0 !important; }
     .momo-badge {
-      background: #FCE8E9; color: #C42633; border: 1px solid rgba(196,38,51,0.12);
-      padding: 2px 8px; border-radius: 20px; font-size: 0.68rem; font-weight: 700;
+      background: #FCE8E9 !important; color: #C42633 !important; border: 1px solid rgba(196,38,51,0.12) !important;
+      padding: 2px 8px !important; border-radius: 20px !important; font-size: 0.68rem !important; font-weight: 700 !important;
     }
-    .momo-msg-imgs { margin-top: 6px; }
-    .momo-inline-img { max-width: 100%; border-radius: 6px; border: 1px solid #E8E8ED; margin-bottom: 6px; display: block; }
+    .momo-msg-imgs { margin: 6px 0 0 0 !important; }
+    .momo-inline-img { max-width: 100% !important; border-radius: 6px !important; border: 1px solid #E8E8ED !important; margin-bottom: 6px !important; display: block !important; }
 
     /* Thinking dots */
-    .momo-thinking { display: flex; gap: 4px; padding: 4px 0; }
+    .momo-thinking { display: flex !important; gap: 4px !important; padding: 4px 0 !important; align-items: center !important; }
     .momo-thinking span {
-      width: 6px; height: 6px; background: #A0A0B0; border-radius: 50%;
-      animation: momo-dots 1s infinite ease-in-out;
+      width: 6px !important; height: 6px !important; background: #A0A0B0 !important; border-radius: 50% !important;
+      animation: momo-dots 1s infinite ease-in-out !important; display: block !important;
     }
-    .momo-thinking span:nth-child(2) { animation-delay: 0.2s; }
-    .momo-thinking span:nth-child(3) { animation-delay: 0.4s; }
+    .momo-thinking span:nth-child(2) { animation-delay: 0.2s !important; }
+    .momo-thinking span:nth-child(3) { animation-delay: 0.4s !important; }
     @keyframes momo-dots {
       0%,60%,100% { transform: translateY(0); }
       30%          { transform: translateY(-4px); }
@@ -140,109 +147,103 @@
 
     /* Input area */
     .momo-input-area {
-      padding: 12px 16px; border-top: 1px solid #E8E8ED;
-      background: #fff; flex-shrink: 0;
+      padding: 12px 14px !important; border-top: 1px solid #E8E8ED !important;
+      background: #fff !important; flex-shrink: 0 !important; margin: 0 !important;
     }
     .momo-input-row {
-      display: flex; align-items: center; gap: 8px;
-      background: #F9F9FB; border: 1.5px solid #E8E8ED;
-      border-radius: 30px; padding: 4px 4px 4px 14px;
-      transition: border-color 0.2s;
+      display: flex !important; align-items: center !important; gap: 6px !important;
+      background: #F9F9FB !important; border: 1.5px solid #E8E8ED !important;
+      border-radius: 30px !important; padding: 4px 4px 4px 14px !important;
+      transition: border-color 0.2s !important; margin: 0 !important;
     }
-    .momo-input-row:focus-within { border-color: #C42633; }
+    .momo-input-row:focus-within { border-color: #C42633 !important; }
     .momo-input-row input {
-      flex: 1; border: none; background: transparent; outline: none;
-      font-size: 0.88rem; color: #1D1D21; height: 38px;
-      font-family: 'Outfit', sans-serif;
+      all: unset !important;
+      flex: 1 !important; font-size: 0.88rem !important; color: #1D1D21 !important;
+      height: 36px !important; line-height: 36px !important; cursor: text !important;
     }
     .momo-send-btn {
-      width: 38px; height: 38px; border-radius: 50%; background: #C42633;
-      border: none; cursor: pointer; display: flex; align-items: center;
-      justify-content: center; transition: background 0.2s, transform 0.15s; flex-shrink: 0;
+      all: unset !important;
+      width: 36px !important; height: 36px !important; border-radius: 50% !important; background: #C42633 !important;
+      cursor: pointer !important; display: flex !important; align-items: center !important;
+      justify-content: center !important; transition: background 0.2s, transform 0.15s !important; flex-shrink: 0 !important;
     }
-    .momo-send-btn:hover { background: #A51D29; transform: scale(1.05); }
-    .momo-send-btn:disabled { background: #D1D1D1; cursor: not-allowed; transform: none; }
-    .momo-send-btn svg { width: 16px; height: 16px; stroke: #fff; fill: none; }
+    .momo-send-btn:hover { background: #A51D29 !important; transform: scale(1.05) !important; }
+    .momo-send-btn:disabled { background: #D1D1D1 !important; cursor: not-allowed !important; transform: none !important; }
+    .momo-send-btn svg { width: 15px !important; height: 15px !important; stroke: #fff !important; fill: none !important; display: block !important; }
     .momo-input-footer {
-      text-align: center; font-size: 0.65rem; color: #B0B0C0;
-      margin-top: 6px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      text-align: center !important; font-size: 0.62rem !important; color: #B0B0C0 !important;
+      margin: 6px 0 0 0 !important; font-weight: 600 !important; text-transform: uppercase !important; letter-spacing: 0.04em !important;
     }
     .momo-full-page-link {
-      display: block; text-align: center; margin-bottom: 8px;
-      font-size: 0.78rem; font-weight: 600; color: #C42633;
-      text-decoration: none; padding: 7px; border-radius: 8px;
-      border: 1px solid rgba(196,38,51,0.18); transition: background 0.2s;
+      display: block !important; text-align: center !important; margin: 0 0 8px 0 !important;
+      font-size: 0.76rem !important; font-weight: 600 !important; color: #C42633 !important;
+      text-decoration: none !important; padding: 6px !important; border-radius: 8px !important;
+      border: 1px solid rgba(196,38,51,0.2) !important; transition: background 0.2s !important;
     }
-    .momo-full-page-link:hover { background: #FCE8E9; }
+    .momo-full-page-link:hover { background: #FCE8E9 !important; }
 
     /* Welcome card */
     .momo-welcome-card {
-      background: #fff; border: 1px solid #E8E8ED; border-radius: 14px;
-      padding: 16px; text-align: center; box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      background: #fff !important; border: 1px solid #E8E8ED !important; border-radius: 14px !important;
+      padding: 16px !important; text-align: center !important; box-shadow: 0 2px 8px rgba(0,0,0,0.05) !important;
+      margin: 0 !important;
     }
-    .momo-welcome-card h4 { color: #C42633; font-size: 0.95rem; margin-bottom: 6px; }
-    .momo-welcome-card p { color: #5E5E6E; font-size: 0.8rem; margin-bottom: 12px; }
-    .momo-suggestions { display: flex; flex-direction: column; gap: 6px; }
+    .momo-welcome-card h4 { color: #C42633 !important; font-size: 0.92rem !important; margin: 0 0 6px 0 !important; font-weight: 700 !important; }
+    .momo-welcome-card p { color: #5E5E6E !important; font-size: 0.78rem !important; margin: 0 0 12px 0 !important; line-height: 1.4 !important; }
+    .momo-suggestions { display: flex !important; flex-direction: column !important; gap: 6px !important; }
     .momo-suggestion {
-      background: #F9F9FB; border: 1px solid #E8E8ED; border-radius: 8px;
-      padding: 8px 12px; font-size: 0.78rem; font-weight: 600;
-      color: #333; cursor: pointer; text-align: left; transition: all 0.15s;
+      all: unset !important;
+      display: block !important; width: 100% !important;
+      background: #F9F9FB !important; border: 1px solid #E8E8ED !important; border-radius: 8px !important;
+      padding: 8px 12px !important; font-size: 0.76rem !important; font-weight: 600 !important;
+      color: #333 !important; cursor: pointer !important; text-align: left !important;
+      transition: all 0.15s !important; line-height: 1.4 !important;
     }
-    .momo-suggestion:hover { border-color: #C42633; background: #FCE8E9; color: #C42633; }
+    .momo-suggestion:hover { border-color: #C42633 !important; background: #FCE8E9 !important; color: #C42633 !important; }
 
     /* Tooltip overlay */
     #momo-tooltip {
-      position: fixed; bottom: 104px; right: 104px; z-index: 99997;
-      background: #fff; border-radius: 14px; padding: 14px 16px;
-      box-shadow: 0 8px 30px rgba(0,0,0,0.14); border: 1px solid #E8E8ED;
-      max-width: 240px; animation: momo-fadeIn 0.3s ease;
-      display: none;
+      position: fixed !important; bottom: 104px !important; right: 104px !important; z-index: 99997 !important;
+      background: #fff !important; border-radius: 14px !important; padding: 14px 16px !important;
+      box-shadow: 0 8px 30px rgba(0,0,0,0.14) !important; border: 1px solid #E8E8ED !important;
+      max-width: 240px !important; animation: momo-fadeIn 0.3s ease !important;
+      display: none !important;
     }
-    #momo-tooltip.momo-show { display: block; }
-    #momo-tooltip p { font-size: 0.82rem; color: #1D1D21; line-height: 1.4; margin-bottom: 8px; }
+    #momo-tooltip.momo-show { display: block !important; }
+    #momo-tooltip p { font-size: 0.82rem !important; color: #1D1D21 !important; line-height: 1.4 !important; margin: 0 0 8px 0 !important; }
     #momo-tooltip .momo-tooltip-close {
-      position: absolute; top: 8px; right: 10px; cursor: pointer;
-      font-size: 1rem; color: #A0A0B0; line-height: 1;
+      position: absolute !important; top: 8px !important; right: 10px !important; cursor: pointer !important;
+      font-size: 1rem !important; color: #A0A0B0 !important; line-height: 1 !important;
     }
     #momo-tooltip .momo-tooltip-cta {
-      background: #C42633; color: #fff; border: none; border-radius: 6px;
-      padding: 6px 14px; font-size: 0.78rem; font-weight: 700; cursor: pointer;
-      transition: background 0.2s; font-family: 'Outfit', sans-serif;
+      all: unset !important;
+      display: inline-block !important;
+      background: #C42633 !important; color: #fff !important; border-radius: 6px !important;
+      padding: 6px 14px !important; font-size: 0.78rem !important; font-weight: 700 !important; cursor: pointer !important;
     }
-    #momo-tooltip .momo-tooltip-cta:hover { background: #A51D29; }
-    .momo-tooltip-arrow {
-      position: absolute; bottom: -8px; right: 24px;
-      width: 16px; height: 8px; overflow: hidden;
-    }
-    .momo-tooltip-arrow::after {
-      content: ''; position: absolute; width: 12px; height: 12px;
-      background: #fff; border: 1px solid #E8E8ED;
-      transform: rotate(45deg); top: -6px; left: 2px;
-    }
+    #momo-tooltip .momo-tooltip-cta:hover { background: #A51D29 !important; }
 
     /* Product page contextual badge */
     #momo-context-badge {
-      position: fixed; bottom: 104px; right: 28px; z-index: 99997;
-      background: #1D1D21; color: #fff; border-radius: 10px;
-      padding: 10px 14px; font-size: 0.78rem; font-weight: 600;
-      max-width: 220px; cursor: pointer; box-shadow: 0 6px 20px rgba(0,0,0,0.2);
-      animation: momo-slideUp 0.4s ease; display: none; line-height: 1.4;
+      position: fixed !important; bottom: 104px !important; right: 28px !important; z-index: 99997 !important;
+      background: #1D1D21 !important; color: #fff !important; border-radius: 10px !important;
+      padding: 10px 14px !important; font-size: 0.78rem !important; font-weight: 600 !important;
+      max-width: 220px !important; cursor: pointer !important; box-shadow: 0 6px 20px rgba(0,0,0,0.2) !important;
+      display: none !important; line-height: 1.4 !important;
     }
-    #momo-context-badge.momo-show { display: block; }
-    #momo-context-badge span { color: #ff9999; }
-    #momo-context-badge .momo-badge-close {
-      float: right; margin-left: 8px; cursor: pointer; opacity: 0.7; font-size: 1rem; line-height: 1;
-    }
+    #momo-context-badge.momo-show { display: block !important; }
+    #momo-context-badge span { color: #ff9999 !important; }
 
     @keyframes momo-fadeIn  { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes momo-slideUp { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
 
     /* Mobile */
     @media (max-width: 480px) {
-      #momo-panel { width: calc(100vw - 24px); right: 12px; bottom: 92px; height: 70vh; }
-      #momo-bubble { bottom: 16px; right: 16px; }
-      #momo-tooltip { right: 12px; bottom: 92px; max-width: calc(100vw - 48px); }
-      #momo-context-badge { right: 12px; max-width: calc(100vw - 80px); }
+      #momo-panel { width: calc(100vw - 24px) !important; right: 12px !important; bottom: 88px !important; height: 70vh !important; }
+      #momo-bubble { bottom: 16px !important; right: 16px !important; }
+      #momo-tooltip { right: 12px !important; bottom: 88px !important; max-width: calc(100vw - 48px) !important; }
+      #momo-context-badge { right: 12px !important; max-width: calc(100vw - 80px) !important; }
     }
   `;
 
@@ -326,7 +327,7 @@
             </svg>
           </button>
         </div>
-        <div class="momo-input-footer">Powered by Load Controls RAG · DeepSeek · Gemini Embedding 2</div>
+        <div class="momo-input-footer">Powered by Load Controls RAG · Gemma 4 · Gemini Embedding 2</div>
       </div>
     </div>
   `;
@@ -428,10 +429,6 @@
     var div = document.createElement('div');
     div.className = 'momo-msg ' + (role === 'user' ? 'momo-user' : 'momo-ai');
 
-    var avatarHtml = role === 'ai'
-      ? '<div class="momo-msg-avatar"><img src="' + ASSET_BASE + '/momo.gif" alt="Miss MoMo"></div>'
-      : '';
-
     var sourcesHtml = '';
     if (sources && sources.length) {
       sourcesHtml = '<div class="momo-sources">' +
@@ -446,13 +443,11 @@
         '</div>';
     }
 
-    var contentHtml =
+    div.innerHTML =
       '<div class="momo-msg-content">' +
         '<div class="momo-bubble-text">' + html + '</div>' +
         sourcesHtml + imagesHtml +
       '</div>';
-
-    div.innerHTML = role === 'ai' ? avatarHtml + contentHtml : contentHtml;
     chatBody.appendChild(div);
     chatBody.scrollTop = chatBody.scrollHeight;
     return div;
@@ -463,7 +458,6 @@
     div.className = 'momo-msg momo-ai';
     div.id = 'momo-thinking';
     div.innerHTML =
-      '<div class="momo-msg-avatar"><img src="' + ASSET_BASE + '/Thinking_Momo.gif" alt="Thinking"></div>' +
       '<div class="momo-msg-content"><div class="momo-bubble-text">' +
         '<div class="momo-thinking"><span></span><span></span><span></span></div>' +
       '</div></div>';
