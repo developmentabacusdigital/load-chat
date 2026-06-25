@@ -346,7 +346,6 @@
       </div>
 
       <div class="momo-input-area">
-        <a href="${SUPPORT_PAGE}" class="momo-full-page-link">↗ Open full support page</a>
         <div class="momo-input-row">
           <input type="text" id="momo-input" placeholder="Ask me anything..." autocomplete="off">
           <button class="momo-send-btn" id="momo-send-btn" aria-label="Send">
@@ -356,7 +355,6 @@
             </svg>
           </button>
         </div>
-        <div class="momo-input-footer">Powered by Load Controls RAG · Gemma 4 · Gemini Embedding 2</div>
       </div>
     </div>
   `;
