@@ -111,8 +111,8 @@ export default function Page() {
         </div>
 
         {/* Upload card */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100">
+        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+          <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl">
             <h2 className="font-semibold text-gray-800">Upload Document</h2>
             <p className="text-xs text-gray-400 mt-0.5">PDF files only · Parsed with Docling · Embedded with Gemini Embedding 2</p>
           </div>
