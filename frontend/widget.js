@@ -71,11 +71,16 @@
       border: 1px solid #E8E8ED !important;
       display: flex !important; flex-direction: column !important; overflow: hidden !important;
       transform: scale(0.92) translateY(16px) !important; opacity: 0 !important; pointer-events: none !important;
-      transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), opacity 0.2s !important;
+      transition: transform 0.25s cubic-bezier(.34,1.56,.64,1), opacity 0.2s, width 0.25s, height 0.25s, bottom 0.25s, right 0.25s, border-radius 0.25s !important;
       transform-origin: bottom right !important; margin: 0 !important; padding: 0 !important;
     }
     #momo-panel.momo-open {
       transform: scale(1) translateY(0) !important; opacity: 1 !important; pointer-events: all !important;
+    }
+    #momo-panel.momo-fullscreen {
+      top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+      width: 100% !important; height: 100% !important; border-radius: 0 !important;
+      transform: scale(1) translateY(0) !important;
     }
 
     /* Panel Header */
@@ -302,6 +307,16 @@
           <span><span class="momo-status-dot" id="momo-status-dot"></span><span id="momo-status-label">Ready</span></span>
         </div>
         <div class="momo-header-actions">
+          <button class="momo-icon-btn" id="momo-fullscreen-btn" aria-label="Toggle fullscreen">
+            <svg id="momo-fs-expand-icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
+              <line x1="21" y1="3" x2="14" y2="10"/><line x1="3" y1="21" x2="10" y2="14"/>
+            </svg>
+            <svg id="momo-fs-compress-icon" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
+              <polyline points="4 14 10 14 10 20"/><polyline points="20 10 14 10 14 4"/>
+              <line x1="10" y1="14" x2="3" y2="21"/><line x1="21" y1="3" x2="14" y2="10"/>
+            </svg>
+          </button>
           <a href="${SUPPORT_PAGE}" class="momo-icon-btn momo-expand-btn" title="Open full support page" aria-label="Open full support page">
             <svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
               <path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/>
@@ -348,25 +363,29 @@
   document.body.appendChild(root);
 
   // ─── DOM refs ────────────────────────────────────────────────────────────────
-  var bubble      = document.getElementById('momo-bubble');
-  var panel       = document.getElementById('momo-panel');
-  var closeBtn    = document.getElementById('momo-close-btn');
-  var chatBody    = document.getElementById('momo-chat-body');
-  var input       = document.getElementById('momo-input');
-  var sendBtn     = document.getElementById('momo-send-btn');
-  var statusDot   = document.getElementById('momo-status-dot');
-  var statusLabel = document.getElementById('momo-status-label');
-  var avatarImg   = document.getElementById('momo-avatar-img');
-  var welcomeCard = document.getElementById('momo-welcome-card');
-  var tooltip     = document.getElementById('momo-tooltip');
-  var tooltipText = document.getElementById('momo-tooltip-text');
-  var tooltipCta  = document.getElementById('momo-tooltip-cta');
-  var tooltipClose= document.getElementById('momo-tooltip-close');
-  var ctxBadge    = document.getElementById('momo-context-badge');
-  var ctxClose    = document.getElementById('momo-context-close');
+  var bubble           = document.getElementById('momo-bubble');
+  var panel            = document.getElementById('momo-panel');
+  var closeBtn         = document.getElementById('momo-close-btn');
+  var fullscreenBtn    = document.getElementById('momo-fullscreen-btn');
+  var fsExpandIcon     = document.getElementById('momo-fs-expand-icon');
+  var fsCompressIcon   = document.getElementById('momo-fs-compress-icon');
+  var chatBody         = document.getElementById('momo-chat-body');
+  var input            = document.getElementById('momo-input');
+  var sendBtn          = document.getElementById('momo-send-btn');
+  var statusDot        = document.getElementById('momo-status-dot');
+  var statusLabel      = document.getElementById('momo-status-label');
+  var avatarImg        = document.getElementById('momo-avatar-img');
+  var welcomeCard      = document.getElementById('momo-welcome-card');
+  var tooltip          = document.getElementById('momo-tooltip');
+  var tooltipText      = document.getElementById('momo-tooltip-text');
+  var tooltipCta       = document.getElementById('momo-tooltip-cta');
+  var tooltipClose     = document.getElementById('momo-tooltip-close');
+  var ctxBadge         = document.getElementById('momo-context-badge');
+  var ctxClose         = document.getElementById('momo-context-close');
 
-  var isOpen = false;
-  var isTyping = false;
+  var isOpen       = false;
+  var isTyping     = false;
+  var isFullscreen = false;
 
   // ─── Panel open/close ────────────────────────────────────────────────────────
   function openPanel() {
@@ -384,8 +403,16 @@
     bubble.setAttribute('aria-expanded', 'false');
   }
 
+  function toggleFullscreen() {
+    isFullscreen = !isFullscreen;
+    panel.classList.toggle('momo-fullscreen', isFullscreen);
+    fsExpandIcon.style.display   = isFullscreen ? 'none'  : '';
+    fsCompressIcon.style.display = isFullscreen ? ''      : 'none';
+  }
+
   bubble.addEventListener('click', function () { isOpen ? closePanel() : openPanel(); });
   closeBtn.addEventListener('click', closePanel);
+  fullscreenBtn.addEventListener('click', toggleFullscreen);
 
   // ─── Tooltip ─────────────────────────────────────────────────────────────────
   function showTooltip(text) {
@@ -437,7 +464,7 @@
   }
 
   // ─── Chat logic ──────────────────────────────────────────────────────────────
-  function appendMsg(role, html, sources, images) {
+  function appendMsg(role, html, sources) {
     if (welcomeCard) { welcomeCard.remove(); welcomeCard = null; }
 
     var div = document.createElement('div');
@@ -450,17 +477,10 @@
         '</div>';
     }
 
-    var imagesHtml = '';
-    if (images && images.length) {
-      imagesHtml = '<div class="momo-msg-imgs">' +
-        images.map(function (src) { return '<img src="' + src + '" class="momo-inline-img" alt="Diagram" loading="lazy">'; }).join('') +
-        '</div>';
-    }
-
     div.innerHTML =
       '<div class="momo-msg-content">' +
         '<div class="momo-bubble-text">' + html + '</div>' +
-        sourcesHtml + imagesHtml +
+        sourcesHtml +
       '</div>';
     chatBody.appendChild(div);
     chatBody.scrollTop = chatBody.scrollHeight;
@@ -522,30 +542,13 @@
       hideThinking();
 
       if (res.ok) {
-        // Extract images requested by the AI
-        var images = [];
-        var showRegex = /\[SHOW_IMAGE:\s*(\d+)\]/g;
-        var requestedIndices = [];
-        var mShow;
-        while ((mShow = showRegex.exec(data.answer)) !== null) {
-          requestedIndices.push(parseInt(mShow[1], 10) - 1);
-        }
+        // Strip any [SHOW_IMAGE:N] tags from the answer (images not shown in widget)
         var cleanAnswer = data.answer.replace(/\[SHOW_IMAGE:\s*\d+\]/g, '').trim();
-
-        if (data.rich_chunks && requestedIndices.length > 0) {
-          var allImgs = [];
-          var imgRe = /!\[[^\]]*\]\((data:image\/[^)]+)\)/g;
-          var mImg;
-          data.rich_chunks.forEach(function (chunk) {
-            while ((mImg = imgRe.exec(chunk)) !== null) allImgs.push(mImg[1]);
-          });
-          requestedIndices.forEach(function (idx) {
-            if (allImgs[idx] && !images.includes(allImgs[idx])) images.push(allImgs[idx]);
-          });
-        }
+        // Also strip embedded base64 image markdown so they don't clutter the text
+        cleanAnswer = cleanAnswer.replace(/!\[[^\]]*\]\(data:image\/[^)]+\)/g, '');
 
         var html = parseMarkdown(cleanAnswer);
-        appendMsg('ai', html, data.sources || [], images);
+        appendMsg('ai', html, data.sources || []);
       } else {
         appendMsg('ai', '<strong>Error:</strong> ' + (data.error || 'The AI service encountered an issue.'));
       }
