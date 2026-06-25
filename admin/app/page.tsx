@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
+const HF_URL   = process.env.NEXT_PUBLIC_HF_SPACE_URL!
+const HF_TOKEN = process.env.NEXT_PUBLIC_HF_TOKEN!
+
 interface Product { title: string; handle: string; image?: string }
 interface Doc     { source: string; product_handles: string[]; engine?: string }
 type StatusType = 'idle' | 'loading' | 'success' | 'error'
@@ -36,7 +39,8 @@ export default function Page() {
   }, [])
 
   function loadDocs() {
-    fetch('/api/documents').then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
+    fetch(`${HF_URL}/documents`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
+      .then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
   }
 
   const onDrop = useCallback((e: React.DragEvent) => {
@@ -59,8 +63,14 @@ export default function Page() {
       form.append('file', file)
       form.append('product_handles', selected.join(','))
       form.append('replace', String(replace))
-      const r    = await fetch('/api/ingest', { method: 'POST', body: form })
-      const data = await r.json()
+      const r    = await fetch(`${HF_URL}/ingest`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
+        body: form,
+      })
+      const text = await r.text()
+      let data: Record<string, unknown>
+      try { data = JSON.parse(text) } catch { throw new Error(text.slice(0, 200)) }
       if (!r.ok) throw new Error(data.detail || data.error || 'Upload failed')
       setStatus({ type: 'success', msg: `✓ ${data.chunks_saved}/${data.chunks_total} chunks saved for "${data.source}"` })
       setFile(null)
@@ -76,7 +86,10 @@ export default function Page() {
   async function handleDelete(source: string) {
     if (!confirm(`Delete all knowledge from "${source}"? This cannot be undone.`)) return
     setDeleting(source)
-    await fetch(`/api/documents/${encodeURIComponent(source)}`, { method: 'DELETE' })
+    await fetch(`${HF_URL}/documents/${encodeURIComponent(source)}`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
+    })
     setDeleting(null)
     loadDocs()
   }
