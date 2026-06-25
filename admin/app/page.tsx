@@ -53,7 +53,7 @@ export default function Page() {
   async function handleUpload() {
     if (!file) return
     setUploading(true)
-    setStatus({ type: 'loading', msg: `Parsing ${file.name} — this may take 1–2 minutes...` })
+    setStatus({ type: 'loading', msg: `Parsing ${file.name} — this takes 2–5 minutes. Please keep this tab open...` })
     try {
       const form = new FormData()
       form.append('file', file)
