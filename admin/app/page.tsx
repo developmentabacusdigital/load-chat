@@ -71,7 +71,7 @@ export default function Page() {
       const text = await r.text()
       let data: Record<string, unknown>
       try { data = JSON.parse(text) } catch { throw new Error(text.slice(0, 200)) }
-      if (!r.ok) throw new Error(data.detail || data.error || 'Upload failed')
+      if (!r.ok) throw new Error(String(data.detail ?? data.error ?? 'Upload failed'))
       setStatus({ type: 'success', msg: `✓ ${data.chunks_saved}/${data.chunks_total} chunks saved for "${data.source}"` })
       setFile(null)
       setSelected([])
