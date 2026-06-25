@@ -5,7 +5,7 @@ import httpx
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Header, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, Depends
 from fastapi.middleware.cors import CORSMiddleware
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -17,7 +17,6 @@ from docling_core.types.doc import ImageRefMode
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 SUPABASE_URL       = os.environ["SUPABASE_URL"]
 SUPABASE_KEY       = os.environ["SUPABASE_KEY"]
-INGEST_API_KEY     = os.environ["INGEST_API_KEY"]
 EMBED_MODEL        = "google/gemini-embedding-2"
 
 # ── Docling setup (initialised once at startup, models cached in container) ──
@@ -46,11 +45,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ── Auth guard ────────────────────────────────────────────────────────────────
-def require_api_key(x_api_key: str = Header(...)):
-    if x_api_key != INGEST_API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API key")
 
 # ── Core pipeline helpers ─────────────────────────────────────────────────────
 def parse_pdf(path: Path) -> str:
@@ -139,7 +133,7 @@ def health():
     return {"status": "ok"}
 
 
-@app.post("/ingest", dependencies=[Depends(require_api_key)])
+@app.post("/ingest")
 async def ingest(
     file: UploadFile = File(...),
     product_handles: str = "",   # comma-separated, e.g. "load-sentinel,pfr-1750"
@@ -176,7 +170,7 @@ async def ingest(
     }
 
 
-@app.get("/documents", dependencies=[Depends(require_api_key)])
+@app.get("/documents")
 def list_documents():
     """Return distinct document names and their product mappings."""
     headers = {
@@ -202,7 +196,7 @@ def list_documents():
     return docs
 
 
-@app.delete("/documents/{source}", dependencies=[Depends(require_api_key)])
+@app.delete("/documents/{source}")
 def delete_document(source: str):
     """Delete all chunks for a document."""
     delete_source(source)
