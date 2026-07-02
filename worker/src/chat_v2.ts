@@ -32,8 +32,7 @@ const EMBED_MODEL   = "google/gemini-embedding-2";
 const GEN_MODEL     = "google/gemma-4-26b-a4b-it";
 const RERANK_MODEL  = "cohere/rerank-v3.5";
 
-const WIDE_MATCH_COUNT = 25;   // §5 retrieve wide
-const MATCH_THRESHOLD  = 0.35; // §5 coarse pre-filter
+const WIDE_MATCH_COUNT = 25;   // §5 retrieve wide (RRF pool; reranker is the real gate)
 const RERANK_TOP_N     = 6;    // §7 keep top 6
 const RERANK_GATE      = 0.3;  // §7 real relevance gate
 
@@ -267,6 +266,31 @@ function toContextBlock(c: Candidate): string {
   return `[Source Document: ${source} | type: ${ct}]\n${body}`;
 }
 
+// ── Casual-chat detection ────────────────────────────────────────────────────
+// Greetings/pleasantries shouldn't run the retrieval+rerank gate (which would
+// otherwise return "no documentation"). Fully-anchored so real questions that
+// merely start with "hi"/"how" don't get misrouted. Matches v1 system-prompt
+// rule #1 (casual chat, no sources).
+const CASUAL_RE = new RegExp(
+  "^(" +
+  "hi+|hey+|hello|hiya|yo|howdy|sup|hola|namaste|greetings|" +
+  "(hi|hey|hello) there|" +
+  "good\\s*(morning|afternoon|evening|day)|" +
+  "how\\s*(are|r)\\s*(you|u)|how'?s\\s*it\\s*going|how\\s*are\\s*things|" +
+  "what'?s\\s*up|whats\\s*up|wassup|" +
+  "thanks?|thank\\s*you|thx|ty|cheers|much\\s*appreciated|" +
+  "bye|goodbye|see\\s*(ya|you)|later|" +
+  "ok(ay)?|kk|cool|nice|great|awesome|got\\s*it|" +
+  "lol|haha+|" +
+  "who\\s*(are|r)\\s*(you|u)|what\\s*(are|r)\\s*(you|u)|what\\s*can\\s*you\\s*do|what\\s*do\\s*you\\s*do|" +
+  "introduce\\s*yourself" +
+  ")[\\s!.?]*$",
+  "i",
+);
+function isCasualChat(q: string): boolean {
+  return CASUAL_RE.test(q.trim());
+}
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 export async function handleChatV2(request: Request, env: Env): Promise<Response> {
   if (!env.SUPABASE_URL_V2 || !env.SUPABASE_KEY_V2) {
@@ -279,6 +303,27 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   if (!query) return jsonResponse({ error: "Missing 'query' field" }, 400);
 
   const key = env.OPENROUTER_API_KEY;
+
+  // Casual chat (greetings/pleasantries): answer conversationally via the
+  // persona, skip retrieval entirely. Keeps the §7 anti-hallucination gate for
+  // real technical questions while not stonewalling "Hi".
+  if (isCasualChat(query)) {
+    try {
+      const gen = await generate(key, query, [], "");
+      return jsonResponse({
+        answer: gen.answer,
+        sources: [],
+        input_tokens: gen.inputTokens,
+        output_tokens: gen.outputTokens,
+        finish_reason: gen.finishReason,
+        engine: "v2: casual-chat",
+        rewritten_query: query,
+        product_handles: [],
+      });
+    } catch (e) {
+      return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
+    }
+  }
 
   // §8 rewrite → §9 resolve handles → embed
   const rewritten = await rewriteQuery(key, query, history);
