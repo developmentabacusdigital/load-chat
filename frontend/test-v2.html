@@ -57,13 +57,13 @@
   <ul class="hist" id="histView"></ul>
 
 <script>
-  var history = []; // {role, content} — sent to v2 only
+  var convo = []; // {role, content} — sent to v2 only (named 'convo', not 'history', to avoid clashing with window.history)
 
   function el(id) { return document.getElementById(id); }
   function esc(s) { return (s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
 
   function renderHistory() {
-    el("histView").innerHTML = history.map(function (m) {
+    el("histView").innerHTML = convo.map(function (m) {
       return "<li><b>" + esc(m.role) + ":</b> " + esc(m.content) + "</li>";
     }).join("");
   }
@@ -105,8 +105,8 @@
     el("v1").innerHTML = '<span class="spin">…</span>';
     el("v2").innerHTML = '<span class="spin">…</span>';
 
-    var histForV2 = history.slice();
-    history.push({ role: "user", content: q });
+    var histForV2 = convo.slice();
+    convo.push({ role: "user", content: q });
     renderHistory();
     el("q").value = "";
 
@@ -119,14 +119,14 @@
 
     // record v2's answer as assistant turn so follow-ups have context
     if (results[1].data && results[1].data.answer) {
-      history.push({ role: "assistant", content: results[1].data.answer });
+      convo.push({ role: "assistant", content: results[1].data.answer });
       renderHistory();
     }
   }
 
   el("send").onclick = send;
   el("q").addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
-  el("reset").onclick = function () { history = []; renderHistory(); el("v1").innerHTML = el("v2").innerHTML = ""; };
+  el("reset").onclick = function () { convo = []; renderHistory(); el("v1").innerHTML = el("v2").innerHTML = ""; };
 </script>
 </body>
 </html>
