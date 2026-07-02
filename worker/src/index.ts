@@ -1,13 +1,21 @@
 // Cloudflare RAG Worker
 // =====================
 // Handles:
-//   /chat         → Gemini Embedding 2 (3072d) pipeline
+//   /chat         → v1 Gemini Embedding 2 (3072d) pipeline (baseline, untouched)
+//   /chat/v2      → v2 hybrid + rerank pipeline (separate Supabase project)
 //   /health       → Health check
+
+import { handleChatV2 } from "./chat_v2";
 
 export interface Env {
   SUPABASE_URL: string;
   SUPABASE_KEY: string;
   OPENROUTER_API_KEY: string;
+  // ── v2 (parallel A/B pipeline → separate Supabase project) ──
+  SUPABASE_URL_V2?: string;
+  SUPABASE_KEY_V2?: string;
+  SHOPIFY_STORE_DOMAIN?: string;
+  SHOPIFY_STOREFRONT_TOKEN?: string;
 }
 
 const CORS_HEADERS = {
@@ -245,6 +253,16 @@ export default {
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         console.error("Chat error:", message);
+        return jsonResponse({ error: `Server error: ${message}` }, 500);
+      }
+    }
+
+    if (url.pathname === "/chat/v2" && request.method === "POST") {
+      try {
+        return await handleChatV2(request, env);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error("Chat v2 error:", message);
         return jsonResponse({ error: `Server error: ${message}` }, 500);
       }
     }

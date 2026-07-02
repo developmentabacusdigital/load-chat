@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RAG v1 vs v2 — comparison harness</title>
+<style>
+  :root { color-scheme: light dark; }
+  * { box-sizing: border-box; }
+  body { font: 14px/1.5 system-ui, sans-serif; margin: 0; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { opacity: .7; margin: 0 0 16px; }
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 12px; }
+  input[type=text] { flex: 1 1 320px; padding: 8px 10px; border: 1px solid #8884; border-radius: 8px; background: transparent; color: inherit; }
+  button { padding: 8px 14px; border: 0; border-radius: 8px; background: #2563eb; color: #fff; cursor: pointer; }
+  button.secondary { background: #6b7280; }
+  .api { flex: 1 1 380px; font-size: 12px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+  .col { border: 1px solid #8884; border-radius: 10px; padding: 12px; min-height: 120px; }
+  .col h2 { font-size: 14px; margin: 0 0 8px; display: flex; justify-content: space-between; }
+  .badge { font-size: 11px; opacity: .7; font-weight: 400; }
+  .answer { white-space: pre-wrap; }
+  .meta { font-size: 12px; opacity: .75; margin-top: 10px; border-top: 1px dashed #8884; padding-top: 8px; }
+  .meta code { background: #8882; padding: 1px 4px; border-radius: 4px; }
+  .hist { font-size: 12px; opacity: .8; margin: 8px 0 0; }
+  .hist li { margin: 2px 0; }
+  img.diagram { max-width: 100%; border: 1px solid #8884; border-radius: 6px; margin-top: 8px; }
+  .err { color: #dc2626; }
+  .spin { opacity: .6; }
+</style>
+</head>
+<body>
+  <h1>RAG comparison harness — v1 <code>/chat</code> vs v2 <code>/chat/v2</code></h1>
+  <p class="sub">Sends the same query to both endpoints. v2 also receives conversation history (drives §8 query rewriting). History persists across turns; use Reset to clear it.</p>
+
+  <div class="controls">
+    <input id="api" class="api" type="text" value="https://rag-worker.development-abacusdigital.workers.dev" title="Worker base URL" />
+  </div>
+  <div class="controls">
+    <input id="q" type="text" placeholder="Ask a question… e.g. what turns setting for a 15 HP motor" />
+    <button id="send">Send to both</button>
+    <button id="reset" class="secondary">Reset history</button>
+  </div>
+
+  <div class="cols">
+    <div class="col">
+      <h2>v1 <span class="badge">/chat · no history</span></h2>
+      <div id="v1"></div>
+    </div>
+    <div class="col">
+      <h2>v2 <span class="badge">/chat/v2 · +history</span></h2>
+      <div id="v2"></div>
+    </div>
+  </div>
+
+  <ul class="hist" id="histView"></ul>
+
+<script>
+  var history = []; // {role, content} — sent to v2 only
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) { return (s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+
+  function renderHistory() {
+    el("histView").innerHTML = history.map(function (m) {
+      return "<li><b>" + esc(m.role) + ":</b> " + esc(m.content) + "</li>";
+    }).join("");
+  }
+
+  function renderResult(target, data, ms) {
+    if (data.error) { el(target).innerHTML = '<div class="err">' + esc(data.error) + "</div>"; return; }
+    var html = '<div class="answer">' + esc(data.answer) + "</div>";
+    (data.images || []).forEach(function (u) { html += '<img class="diagram" src="' + esc(u) + '" />'; });
+    html += '<div class="meta">';
+    html += "⏱ " + ms + "ms · in " + (data.input_tokens || 0) + " / out " + (data.output_tokens || 0);
+    if (data.finish_reason) html += " · finish=<code>" + esc(data.finish_reason) + "</code>";
+    if (data.rewritten_query) html += "<br>rewritten: <code>" + esc(data.rewritten_query) + "</code>";
+    if (data.product_handles && data.product_handles.length) html += "<br>handles: <code>" + esc(data.product_handles.join(", ")) + "</code>";
+    if (data.debug_chunk_types) html += "<br>chunks: <code>" + esc(data.debug_chunk_types.join(", ")) + "</code>";
+    if (data.sources && data.sources.length) html += "<br>sources: " + esc(data.sources.join(", "));
+    html += "</div>";
+    el(target).innerHTML = html;
+  }
+
+  async function call(path, payload) {
+    var base = el("api").value.replace(/\/+$/, "");
+    var t0 = performance.now();
+    try {
+      var res = await fetch(base + path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      var data = await res.json();
+      return { data: data, ms: Math.round(performance.now() - t0) };
+    } catch (e) {
+      return { data: { error: String(e) }, ms: Math.round(performance.now() - t0) };
+    }
+  }
+
+  async function send() {
+    var q = el("q").value.trim();
+    if (!q) return;
+    el("v1").innerHTML = '<span class="spin">…</span>';
+    el("v2").innerHTML = '<span class="spin">…</span>';
+
+    var histForV2 = history.slice();
+    history.push({ role: "user", content: q });
+    renderHistory();
+    el("q").value = "";
+
+    var results = await Promise.all([
+      call("/chat", { query: q }),                       // v1: no history
+      call("/chat/v2", { query: q, history: histForV2 }), // v2: with history
+    ]);
+    renderResult("v1", results[0].data, results[0].ms);
+    renderResult("v2", results[1].data, results[1].ms);
+
+    // record v2's answer as assistant turn so follow-ups have context
+    if (results[1].data && results[1].data.answer) {
+      history.push({ role: "assistant", content: results[1].data.answer });
+      renderHistory();
+    }
+  }
+
+  el("send").onclick = send;
+  el("q").addEventListener("keydown", function (e) { if (e.key === "Enter") send(); });
+  el("reset").onclick = function () { history = []; renderHistory(); el("v1").innerHTML = el("v2").innerHTML = ""; };
+</script>
+</body>
+</html>

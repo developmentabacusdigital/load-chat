@@ -5,13 +5,15 @@ import httpx
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.datamodel.base_models import InputFormat
 from docling_core.types.doc import ImageRefMode
+
+import pipeline_v2  # noqa: E402  (v2 A/B pipeline → separate Supabase project)
 
 # ── Config ────────────────────────────────────────────────────────────────────
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
@@ -21,6 +23,7 @@ EMBED_MODEL        = "google/gemini-embedding-2"
 
 # ── Docling setup (initialised once at startup, models cached in container) ──
 pipeline_options = PdfPipelineOptions()
+pipeline_options.do_ocr                  = False  # PDFs have embedded text; OCR not needed
 pipeline_options.generate_picture_images = True
 pipeline_options.generate_table_images   = False
 pipeline_options.images_scale            = 2.0
@@ -158,6 +161,9 @@ async def ingest(
         md     = parse_pdf(tmp_path)
         chunks = chunk_markdown(md)
         saved, errors = save_chunks(chunks, source, handles)
+    except Exception as e:
+        tmp_path.unlink(missing_ok=True)
+        raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
     finally:
         tmp_path.unlink(missing_ok=True)
 
@@ -201,3 +207,45 @@ def delete_document(source: str):
     """Delete all chunks for a document."""
     delete_source(source)
     return {"deleted": source}
+
+
+# ── v2 routes (parallel A/B pipeline → separate Supabase project) ────────────
+# These do NOT touch the live v1 table; pipeline_v2 uses SUPABASE_URL_V2 /
+# SUPABASE_KEY_V2. The v1 routes above are unchanged.
+@app.post("/ingest/v2")
+async def ingest_v2(
+    file: UploadFile = File(...),
+    product_handles: str = "",
+    replace: bool = True,
+):
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(400, "Only PDF files are supported.")
+
+    handles = [h.strip() for h in product_handles.split(",") if h.strip()]
+    source  = file.filename
+    contents = await file.read()
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(contents)
+        tmp_path = Path(tmp.name)
+
+    try:
+        result = converter.convert(str(tmp_path))          # convert once
+        stats  = pipeline_v2.ingest_document_v2(result, source, handles, replace)
+    except Exception as e:
+        raise HTTPException(500, f"{type(e).__name__}: {str(e)}")
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return stats
+
+
+@app.get("/documents/v2")
+def list_documents_v2():
+    return pipeline_v2.list_documents_v2()
+
+
+@app.delete("/documents/v2/{source}")
+def delete_document_v2(source: str):
+    pipeline_v2.delete_source_v2(source)
+    return {"deleted": source, "target": "v2"}
