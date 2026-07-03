@@ -108,12 +108,17 @@
       var res = await fetch(base + path, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        cache: "no-store",
         body: JSON.stringify(payload),
       });
-      var data = await res.json();
+      var text = await res.text();
+      var data;
+      try { data = JSON.parse(text); }
+      catch (_) { data = { error: "HTTP " + res.status + " (non-JSON): " + text.slice(0, 200) }; }
+      if (!res.ok && !data.error) data = { error: "HTTP " + res.status + ": " + JSON.stringify(data).slice(0, 200) };
       return { data: data, ms: Math.round(performance.now() - t0) };
     } catch (e) {
-      return { data: { error: String(e) }, ms: Math.round(performance.now() - t0) };
+      return { data: { error: "fetch failed: " + String(e) + " (URL: " + base + path + ")" }, ms: Math.round(performance.now() - t0) };
     }
   }
 
