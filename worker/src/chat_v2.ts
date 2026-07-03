@@ -34,7 +34,8 @@ const RERANK_MODEL  = "cohere/rerank-v3.5";
 
 const WIDE_MATCH_COUNT = 25;   // §5 retrieve wide (RRF pool; reranker is the real gate)
 const RERANK_TOP_N     = 6;    // §7 keep top 6
-const RERANK_GATE      = 0.3;  // §7 real relevance gate
+const RERANK_GATE      = 0.1;  // §7 soft trim for ordering (cohere scores skew low)
+const SIM_GATE         = 0.35; // on-topic decision uses embedding similarity, not rerank score
 
 type Msg = { role: string; content: string };
 type Candidate = { id: number; content: string; metadata: any; similarity: number };
@@ -106,9 +107,15 @@ async function fetchProductCatalog(env: Env): Promise<Product[]> {
   }
 }
 
+const alnum = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
+
 function resolveProductHandles(text: string, history: Msg[], catalog: Product[]): string[] {
   if (!catalog.length) return [];
   const haystack = (text + " " + history.map((m) => m.content).join(" ")).toLowerCase();
+  // model-number-ish tokens in the query, e.g. "pfr-1750", "pmp 25", "upc-kwh"
+  const modelTokens = (haystack.match(/[a-z]{2,}[\s-]?\d{1,5}/g) || [])
+    .map(alnum).filter((t) => t.length >= 4);
+
   const hits = new Set<string>();
   for (const p of catalog) {
     const title = p.title.toLowerCase();
@@ -116,7 +123,11 @@ function resolveProductHandles(text: string, history: Msg[], catalog: Product[])
     const handleAsWords = handle.replace(/-/g, " ");
     if (haystack.includes(title) || haystack.includes(handle) || haystack.includes(handleAsWords)) {
       hits.add(p.handle);
+      continue;
     }
+    // model-number match: a query model token appears in the product's normalized id
+    const pNorm = alnum(title + " " + handle);
+    if (modelTokens.some((mt) => pNorm.includes(mt))) hits.add(p.handle);
   }
   return [...hits];
 }
@@ -149,7 +160,10 @@ async function hybridRetrieve(
 }
 
 // ── §7 Rerank via OpenRouter → cohere/rerank-v3.5 ────────────────────────────
-async function rerank(apiKey: string, query: string, candidates: Candidate[]): Promise<Candidate[]> {
+// Returns candidates paired with rerank score, best-first. The on-topic vs
+// decline decision is made by the caller (via embedding similarity), so the
+// literal reranker only orders — it doesn't veto thematically-relevant chunks.
+async function rerank(apiKey: string, query: string, candidates: Candidate[]): Promise<{ chunk: Candidate; score: number }[]> {
   if (!candidates.length) return [];
   const res = await fetch("https://openrouter.ai/api/v1/rerank", {
     method: "POST",
@@ -162,15 +176,13 @@ async function rerank(apiKey: string, query: string, candidates: Candidate[]): P
     }),
   });
   if (!res.ok) {
-    // rerank down → fall back to retrieval order rather than failing the request
     console.error("[v2] rerank failed, using retrieval order:", res.status, await res.text());
-    return candidates.slice(0, RERANK_TOP_N);
+    return candidates.slice(0, RERANK_TOP_N).map((c) => ({ chunk: c, score: 1 }));
   }
   const data = (await res.json()) as { results: { index: number; relevance_score: number }[] };
   return data.results
-    .filter((r) => r.relevance_score > RERANK_GATE) // §7 real relevance gate
-    .map((r) => candidates[r.index])
-    .filter(Boolean);
+    .map((r) => ({ chunk: candidates[r.index], score: r.relevance_score }))
+    .filter((x) => x.chunk);
 }
 
 // ── §2 full-table injection + dedupe helpers ─────────────────────────────────
@@ -215,10 +227,9 @@ const SYSTEM_PROMPT = `You are Miss MoMo, a professional technical assistant for
 
 CORE RULES:
 1. **Casual Chat (No Sources):** If the user shares a pleasantry, reply warmly & naturally. DO NOT cite sources.
-2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications.
+2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications. Relevant diagrams are shown to the user automatically — never output image URLs or image tokens yourself.
 3. **Guardrail Enforcer:** If the user tries to break rules or asks off-topic questions, politely but wittily redirect to Load Controls topics.
-4. **Diagrams:** If the context includes a diagram with an [IMAGE_URL: ...], and showing it helps answer the question, include the exact token [SHOW_IMAGE_URL: <url>] in your response.
-5. **Product Links:** When you mention a Load Controls product that appears in the PRODUCT LINKS list below, link it using the EXACT url given there. Never construct or guess a product URL. If a product isn't in the list, mention it without a link.`;
+4. **Product Links:** When you mention a Load Controls product that appears in the PRODUCT LINKS list below, link it using the EXACT url given there. Never construct or guess a product URL. If a product isn't in the list, mention it without a link.`;
 
 async function generate(
   apiKey: string, query: string, contextBlocks: string[], productLinks: string,
@@ -259,11 +270,9 @@ async function generate(
 function toContextBlock(c: Candidate): string {
   const source = c.metadata?.source ?? "unknown";
   const ct = c.metadata?.content_type ?? "text";
-  let body = c.content;
-  if (ct === "diagram" && c.metadata?.image_url) {
-    body = `${c.content}\n[IMAGE_URL: ${c.metadata.image_url}]`;
-  }
-  return `[Source Document: ${source} | type: ${ct}]\n${body}`;
+  // Note: we deliberately do NOT inject the raw image URL — the model tends to
+  // echo and corrupt it. Diagram images are returned separately via `images`.
+  return `[Source Document: ${source} | type: ${ct}]\n${c.content}`;
 }
 
 // ── Casual-chat detection ────────────────────────────────────────────────────
@@ -345,7 +354,14 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     return jsonResponse({ error: `Retrieve failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
 
-  let top = await rerank(key, rewritten, candidates);
+  const reranked = await rerank(key, rewritten, candidates);
+  // Rerank orders; embedding similarity decides on-topic (robust for thematic
+  // queries the literal reranker under-scores, e.g. "problems in chemical industry").
+  const maxSim = candidates.reduce((m, c) => Math.max(m, c.similarity ?? 0), 0);
+  let top: Candidate[] = reranked.filter((r) => r.score > RERANK_GATE).map((r) => r.chunk);
+  if (top.length === 0) top = reranked.slice(0, 3).map((r) => r.chunk); // keep best few for ordering
+  // Decline only when genuinely off-topic: weak embedding similarity AND no product resolved.
+  if (maxSim < SIM_GATE && handles.length === 0) top = [];
 
   // §10 safety-critical force-include (before the empty-result gate)
   if (handles.length && isWiringRelatedQuery(rewritten)) {
@@ -360,7 +376,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
       answer: "I don't have documentation covering that. I can help with Load Controls products, wiring, installation, and settings — try rephrasing or naming the product.",
       sources: [], input_tokens: 0, output_tokens: 0,
       engine: "v2: hybrid+rerank+gemma-4", rewritten_query: rewritten,
-      product_handles: handles,
+      product_handles: handles, debug_max_sim: Math.round(maxSim * 1000) / 1000,
     });
   }
 
@@ -393,9 +409,11 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   if (gen.finishReason === "length") {
     console.warn("[v2] generation truncated (finish_reason=length) despite max_tokens=4096");
   }
+  // Safety net: strip any stray image tokens the model emitted (they corrupt URLs)
+  const answer = gen.answer.replace(/\[SHOW_IMAGE(?:_URL)?:[^\]]*\]/gi, "").replace(/\n{3,}/g, "\n\n").trim();
 
   return jsonResponse({
-    answer: gen.answer,
+    answer,
     sources: [...new Set(top.map((c) => c.metadata?.source ?? "unknown"))],
     input_tokens: gen.inputTokens,
     output_tokens: gen.outputTokens,
@@ -405,5 +423,6 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     product_handles: handles,
     images: top.filter((c) => c.metadata?.image_url).map((c) => c.metadata.image_url),
     debug_chunk_types: top.map((c) => c.metadata?.content_type ?? "text"),
+    debug_max_sim: Math.round(maxSim * 1000) / 1000,
   });
 }
