@@ -3,10 +3,12 @@ import re
 import tempfile
 import httpx
 from pathlib import Path
+from urllib.parse import quote
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling.datamodel.pipeline_options import PdfPipelineOptions
@@ -130,6 +132,45 @@ def delete_source(source: str):
         timeout=30.0,
     )
 
+
+def set_product_handles(source: str, handles: list[str]) -> int:
+    """Update product_handles for every chunk of a document in place, WITHOUT
+    re-ingesting. Rewrites the full metadata per row (preserving chunk index,
+    engine, has_image, etc.) with only product_handles replaced. Targets rows by
+    (source, chunk) so it doesn't depend on the table's PK column. Returns the
+    number of chunks updated."""
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    src = quote(source, safe="")
+    r = httpx.get(
+        f"{SUPABASE_URL}/rest/v1/documents_gemini?metadata->>source=eq.{src}&select=metadata",
+        headers=headers, timeout=30.0,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    if not rows:
+        return 0
+
+    updated = 0
+    patch_headers = {**headers, "Prefer": "return=minimal"}
+    for row in rows:
+        md = row.get("metadata") or {}
+        md["product_handles"] = handles
+        chunk = md.get("chunk")
+        if chunk is None:
+            continue
+        pr = httpx.patch(
+            f"{SUPABASE_URL}/rest/v1/documents_gemini"
+            f"?metadata->>source=eq.{src}&metadata->>chunk=eq.{chunk}",
+            headers=patch_headers, json={"metadata": md}, timeout=30.0,
+        )
+        if pr.status_code in (200, 204):
+            updated += 1
+    return updated
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
@@ -207,6 +248,20 @@ def delete_document(source: str):
     """Delete all chunks for a document."""
     delete_source(source)
     return {"deleted": source}
+
+
+class ProductTags(BaseModel):
+    product_handles: list[str] = []
+
+
+@app.patch("/documents/{source}/products")
+def update_document_products(source: str, tags: ProductTags):
+    """Re-tag which products a document is connected to, without re-ingesting."""
+    handles = [h.strip() for h in tags.product_handles if h and h.strip()]
+    updated = set_product_handles(source, handles)
+    if updated == 0:
+        raise HTTPException(404, f"No chunks found for document '{source}'")
+    return {"source": source, "product_handles": handles, "updated": updated}
 
 
 # ── v2 routes (parallel A/B pipeline → separate Supabase project) ────────────

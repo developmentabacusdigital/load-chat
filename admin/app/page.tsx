@@ -21,6 +21,11 @@ export default function Page() {
   const [uploading, setUploading] = useState(false)
   const [status, setStatus]       = useState<{ type: StatusType; msg: string }>({ type: 'idle', msg: '' })
   const [deleting, setDeleting]   = useState<string | null>(null)
+  // Inline editing of a document's product tags (no re-upload)
+  const [editing, setEditing]         = useState<string | null>(null)
+  const [editHandles, setEditHandles] = useState<string[]>([])
+  const [editSearch, setEditSearch]   = useState('')
+  const [savingEdit, setSavingEdit]   = useState(false)
   const fileRef  = useRef<HTMLInputElement>(null)
   const dropRef  = useRef<HTMLDivElement>(null)
 
@@ -92,6 +97,41 @@ export default function Page() {
     })
     setDeleting(null)
     loadDocs()
+  }
+
+  function startEdit(doc: Doc) {
+    setEditing(doc.source)
+    setEditHandles(doc.product_handles ?? [])
+    setEditSearch('')
+  }
+
+  function cancelEdit() {
+    setEditing(null)
+    setEditHandles([])
+    setEditSearch('')
+  }
+
+  function toggleEditHandle(handle: string) {
+    setEditHandles(s => s.includes(handle) ? s.filter(h => h !== handle) : [...s, handle])
+  }
+
+  async function saveEdit(source: string) {
+    setSavingEdit(true)
+    try {
+      const r = await fetch(`${HF_URL}/documents/${encodeURIComponent(source)}/products`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_handles: editHandles }),
+      })
+      if (!r.ok) throw new Error((await r.text()).slice(0, 200))
+      setDocs(ds => ds.map(d => d.source === source ? { ...d, product_handles: editHandles } : d))
+      setStatus({ type: 'success', msg: `✓ Updated product tags for "${source}"` })
+      cancelEdit()
+    } catch (e: unknown) {
+      setStatus({ type: 'error', msg: e instanceof Error ? e.message : 'Failed to update tags' })
+    } finally {
+      setSavingEdit(false)
+    }
   }
 
   const filtered = products.filter(p =>
@@ -275,35 +315,115 @@ export default function Page() {
             </div>
           ) : (
             <div className="divide-y divide-gray-50">
-              {docs.map(doc => (
+              {docs.map(doc => {
+                const isEditing = editing === doc.source
+                const editFiltered = products.filter(p =>
+                  (p.title.toLowerCase().includes(editSearch.toLowerCase()) ||
+                   p.handle.toLowerCase().includes(editSearch.toLowerCase())) &&
+                  !editHandles.includes(p.handle)
+                )
+                return (
                 <div key={doc.source} className="px-6 py-4 flex items-start gap-3 hover:bg-gray-50/50 transition-colors">
                   <span className="text-xl mt-0.5 flex-shrink-0">📄</span>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium text-sm text-gray-800 truncate">{doc.source}</div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {doc.product_handles?.length > 0
-                        ? doc.product_handles.map(h => {
-                            const p = products.find(p => p.handle === h)
-                            return (
-                              <span key={h} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
-                                {p?.image && <img src={p.image} className="w-3 h-3 rounded-full object-cover" alt="" />}
-                                {p?.title ?? h}
-                              </span>
-                            )
-                          })
-                        : <span className="text-xs text-gray-300 italic">No products tagged</span>
-                      }
-                    </div>
+
+                    {!isEditing ? (
+                      /* Read-only tags + Edit affordance */
+                      <div className="flex flex-wrap items-center gap-1 mt-1.5">
+                        {doc.product_handles?.length > 0
+                          ? doc.product_handles.map(h => {
+                              const p = products.find(p => p.handle === h)
+                              return (
+                                <span key={h} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
+                                  {p?.image && <img src={p.image} className="w-3 h-3 rounded-full object-cover" alt="" />}
+                                  {p?.title ?? h}
+                                </span>
+                              )
+                            })
+                          : <span className="text-xs text-gray-300 italic">No products tagged</span>
+                        }
+                        <button
+                          onClick={() => startEdit(doc)}
+                          className="text-xs text-brand hover:text-brand-dark font-medium px-1.5 py-0.5 rounded"
+                        >
+                          ✎ Edit tags
+                        </button>
+                      </div>
+                    ) : (
+                      /* Editable product multi-select */
+                      <div className="mt-2 space-y-2">
+                        <div className="flex flex-wrap gap-1.5">
+                          {editHandles.length > 0
+                            ? editHandles.map(h => {
+                                const p = products.find(p => p.handle === h)
+                                return (
+                                  <span key={h} className="inline-flex items-center gap-1 bg-brand-light text-brand text-xs font-semibold px-2.5 py-1 rounded-full">
+                                    {p?.title ?? h}
+                                    <button onClick={() => toggleEditHandle(h)} className="hover:text-brand-dark text-sm leading-none ml-0.5">×</button>
+                                  </span>
+                                )
+                              })
+                            : <span className="text-xs text-gray-300 italic">No products tagged — search below to add</span>
+                          }
+                        </div>
+
+                        <div className="relative">
+                          <input
+                            value={editSearch}
+                            onChange={e => setEditSearch(e.target.value)}
+                            placeholder={products.length ? 'Search products to add...' : 'No Shopify products loaded'}
+                            className="w-full border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand transition-colors"
+                          />
+                          {editSearch && editFiltered.length > 0 && (
+                            <div className="absolute z-10 w-full mt-1 border border-gray-200 rounded-xl shadow-lg bg-white max-h-48 overflow-y-auto">
+                              {editFiltered.map(p => (
+                                <div
+                                  key={p.handle}
+                                  onMouseDown={() => { toggleEditHandle(p.handle); setEditSearch('') }}
+                                  className="flex items-center gap-2.5 px-3 py-2 cursor-pointer text-sm hover:bg-gray-50"
+                                >
+                                  {p.image && <img src={p.image} className="w-6 h-6 rounded object-cover flex-shrink-0" alt="" />}
+                                  <span className="text-gray-700 flex-1 truncate">{p.title}</span>
+                                  <span className="text-gray-300 text-xs flex-shrink-0">{p.handle}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => saveEdit(doc.source)}
+                            disabled={savingEdit}
+                            className="bg-brand hover:bg-brand-dark disabled:opacity-40 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors"
+                          >
+                            {savingEdit ? 'Saving...' : 'Save tags'}
+                          </button>
+                          <button
+                            onClick={cancelEdit}
+                            disabled={savingEdit}
+                            className="text-xs text-gray-500 hover:text-gray-800 px-2 py-1.5"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </div>
-                  <button
-                    onClick={() => handleDelete(doc.source)}
-                    disabled={deleting === doc.source}
-                    className="flex-shrink-0 text-xs text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors px-3 py-1.5 rounded-lg disabled:opacity-40"
-                  >
-                    {deleting === doc.source ? '...' : 'Delete'}
-                  </button>
+
+                  {!isEditing && (
+                    <button
+                      onClick={() => handleDelete(doc.source)}
+                      disabled={deleting === doc.source}
+                      className="flex-shrink-0 text-xs text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors px-3 py-1.5 rounded-lg disabled:opacity-40"
+                    >
+                      {deleting === doc.source ? '...' : 'Delete'}
+                    </button>
+                  )}
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
