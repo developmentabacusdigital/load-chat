@@ -26,17 +26,8 @@
   }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 40px 20px 80px; position: relative; }
 
-  /* ── Hero (the one place color lives: a soft mesh bloom) ── */
-  .hero { position: relative; margin-bottom: 28px; }
-  .hero::before {
-    content: ""; position: absolute; top: -60px; left: -40px; width: 380px; height: 200px;
-    background:
-      radial-gradient(closest-side, rgba(0,124,240,.28), transparent),
-      radial-gradient(closest-side, rgba(121,40,202,.22), transparent) 60% 40%,
-      radial-gradient(closest-side, rgba(255,0,128,.18), transparent) 80% 60%;
-    filter: blur(40px); z-index: 0; pointer-events: none;
-  }
-  .hero > * { position: relative; z-index: 1; }
+  /* ── Hero ── */
+  .hero { margin-bottom: 28px; }
   .eyebrow { font-family: var(--mono); font-size: 12px; font-weight: 500; letter-spacing: .04em;
              text-transform: uppercase; color: var(--mute); margin: 0 0 10px; }
   h1 { font-size: 34px; font-weight: 600; letter-spacing: -1.4px; line-height: 1.1; margin: 0 0 8px; }
