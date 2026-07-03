@@ -315,7 +315,7 @@ export default function Page() {
         </div>
 
         {/* Knowledge Base */}
-        <div className="bg-white rounded-[12px] border border-[#ebebeb] overflow-hidden">
+        <div className="bg-white rounded-[12px] border border-[#ebebeb]">
           <div className="px-6 py-4 border-b border-[#ebebeb] flex items-center justify-between">
             <div>
               <div className="font-mono text-[11px] uppercase tracking-wide text-[#8f8f8f]">Knowledge Base</div>
@@ -338,17 +338,18 @@ export default function Page() {
             </div>
           ) : (
             <div className="divide-y divide-[#ebebeb]">
-              {docs.map(doc => {
+              {docs.map((doc, idx) => {
                 const handles   = doc.product_handles ?? []
                 const isSaving  = savingSource === doc.source
                 const isAdding  = addingFor === doc.source
+                const openUp    = docs.length > 2 && idx >= docs.length - 2  // flip last rows upward
                 const addFiltered = products.filter(p =>
                   !handles.includes(p.handle) &&
                   (p.title.toLowerCase().includes(addSearch.toLowerCase()) ||
                    p.handle.toLowerCase().includes(addSearch.toLowerCase()))
                 )
                 return (
-                <div key={doc.source} className="px-6 py-4 flex items-start gap-3.5 hover:bg-[#fafafa] transition-colors">
+                <div key={doc.source} className="px-6 py-4 flex items-start gap-3.5 hover:bg-[#fafafa] transition-colors last:rounded-b-[12px]">
                   <span className="text-lg mt-0.5 flex-shrink-0 opacity-80">📄</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -402,7 +403,7 @@ export default function Page() {
                         </button>
 
                         {isAdding && (
-                          <div className="absolute z-20 left-0 mt-1.5 w-[300px] bg-white border border-[#ebebeb] rounded-[12px] shadow-[0px_2px_2px_rgba(0,0,0,0.04),0px_8px_16px_-4px_rgba(0,0,0,0.08)] overflow-hidden">
+                          <div className={`absolute z-50 left-0 w-[300px] bg-white border border-[#ebebeb] rounded-[12px] shadow-[0px_2px_2px_rgba(0,0,0,0.04),0px_8px_16px_-4px_rgba(0,0,0,0.08)] overflow-hidden ${openUp ? 'bottom-full mb-1.5' : 'mt-1.5'}`}>
                             <div className="p-2 border-b border-[#ebebeb]">
                               <input
                                 autoFocus
