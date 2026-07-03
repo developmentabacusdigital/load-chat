@@ -24,6 +24,7 @@ import io
 import json
 import base64
 import uuid
+from urllib.parse import quote
 
 import httpx
 
@@ -404,6 +405,40 @@ def ingest_document_v2(result, source: str, product_handles: list[str], replace:
         "review_flags":    result_stats["review_flags"],
         "errors":          result_stats["errors"],
     }
+
+
+def set_product_handles_v2(source: str, handles: list[str]) -> int:
+    """Re-tag a v2 document's product_handles in place (no re-ingest), preserving
+    all other metadata. Mirrors main.set_product_handles but targets the v2
+    project. Returns the number of chunks updated."""
+    _require_config()
+    headers = _headers()
+    src = quote(source, safe="")
+    r = httpx.get(
+        f"{SUPABASE_URL_V2}/rest/v1/documents_gemini?metadata->>source=eq.{src}&select=metadata",
+        headers=headers, timeout=30.0,
+    )
+    r.raise_for_status()
+    rows = r.json()
+    if not rows:
+        return 0
+
+    updated = 0
+    patch_headers = {**headers, "Prefer": "return=minimal"}
+    for row in rows:
+        md = row.get("metadata") or {}
+        md["product_handles"] = handles
+        chunk = md.get("chunk")
+        if chunk is None:
+            continue
+        pr = httpx.patch(
+            f"{SUPABASE_URL_V2}/rest/v1/documents_gemini"
+            f"?metadata->>source=eq.{src}&metadata->>chunk=eq.{chunk}",
+            headers=patch_headers, json={"metadata": md}, timeout=30.0,
+        )
+        if pr.status_code in (200, 204):
+            updated += 1
+    return updated
 
 
 def list_documents_v2() -> list[dict]:

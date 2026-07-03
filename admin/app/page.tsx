@@ -26,14 +26,26 @@ export default function Page() {
   const [addingFor, setAddingFor]       = useState<string | null>(null)  // doc whose add-popover is open
   const [addSelected, setAddSelected]   = useState<string[]>([])         // multi-select staging
   const [addSearch, setAddSearch]       = useState('')
+  // Which knowledge base the admin is managing: v1 (live) or v2 (A/B project)
+  const [ver, setVer] = useState<'v1' | 'v2'>('v1')
   const fileRef  = useRef<HTMLInputElement>(null)
   const dropRef  = useRef<HTMLDivElement>(null)
   const addRef   = useRef<HTMLDivElement>(null)
 
+  // Route bases per active version. v1: /documents, /ingest ; v2: /documents/v2, /ingest/v2
+  const docBase    = ver === 'v2' ? '/documents/v2' : '/documents'
+  const ingestPath = ver === 'v2' ? '/ingest/v2' : '/ingest'
+
   useEffect(() => {
     fetch('/api/products').then(r => r.json()).then(setProducts).catch(() => {})
-    loadDocs()
   }, [])
+
+  // (Re)load documents whenever the active version changes
+  useEffect(() => {
+    loadDocs(ver)
+    closeAdd()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ver])
 
   // Close dropdowns / popovers when clicking outside
   useEffect(() => {
@@ -46,8 +58,9 @@ export default function Page() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  function loadDocs() {
-    fetch(`${HF_URL}/documents`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
+  function loadDocs(v: 'v1' | 'v2' = ver) {
+    const base = v === 'v2' ? '/documents/v2' : '/documents'
+    fetch(`${HF_URL}${base}`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
       .then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
   }
 
@@ -71,7 +84,7 @@ export default function Page() {
       form.append('file', file)
       form.append('product_handles', selected.join(','))
       form.append('replace', String(replace))
-      const r    = await fetch(`${HF_URL}/ingest`, {
+      const r    = await fetch(`${HF_URL}${ingestPath}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
         body: form,
@@ -92,9 +105,9 @@ export default function Page() {
   }
 
   async function handleDelete(source: string) {
-    if (!confirm(`Delete all knowledge from "${source}"? This cannot be undone.`)) return
+    if (!confirm(`Delete all knowledge from "${source}" (${ver.toUpperCase()})? This cannot be undone.`)) return
     setDeleting(source)
-    await fetch(`${HF_URL}/documents/${encodeURIComponent(source)}`, {
+    await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
     })
@@ -108,7 +121,7 @@ export default function Page() {
     const prev = docs.find(d => d.source === source)?.product_handles ?? []
     setDocs(ds => ds.map(d => d.source === source ? { ...d, product_handles: handles } : d))
     try {
-      const r = await fetch(`${HF_URL}/documents/${encodeURIComponent(source)}/products`, {
+      const r = await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}/products`, {
         method: 'PATCH',
         headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_handles: handles }),
@@ -173,17 +186,34 @@ export default function Page() {
             <h1 className="text-lg font-bold text-gray-900 leading-tight">Miss MoMo Admin</h1>
             <p className="text-xs text-gray-400">Load Controls knowledge base</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-100 px-3 py-1 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
-            Connected
+
+          {/* v1 / v2 knowledge-base toggle */}
+          <div className="ml-auto inline-flex items-center p-0.5 rounded-[8px] border border-[#ebebeb] bg-[#f2f2f2]">
+            {(['v1', 'v2'] as const).map(v => (
+              <button
+                key={v}
+                onClick={() => setVer(v)}
+                title={v === 'v1' ? 'Live project (crnwhln…)' : 'A/B project (bwsqmht…)'}
+                className={`text-[12px] font-medium px-3 py-1 rounded-[6px] transition-colors ${
+                  ver === v ? 'bg-white text-[#171717] shadow-sm' : 'text-[#8f8f8f] hover:text-[#171717]'
+                }`}
+              >
+                {v.toUpperCase()}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Upload card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
-          <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl">
-            <h2 className="font-semibold text-gray-800">Upload Document</h2>
-            <p className="text-xs text-gray-400 mt-0.5">PDF files only · Parsed with Docling · Embedded with Gemini Embedding 2</p>
+          <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-800">Upload Document</h2>
+              <p className="text-xs text-gray-400 mt-0.5">PDF files only · Parsed with Docling · Embedded with Gemini Embedding 2</p>
+            </div>
+            <span className="text-[11px] font-mono uppercase tracking-wide text-[#8f8f8f] bg-[#f2f2f2] border border-[#ebebeb] px-2 py-1 rounded-[6px] whitespace-nowrap">
+              → {ver.toUpperCase()} {ver === 'v2' ? 'hybrid pipeline' : 'knowledge base'}
+            </span>
           </div>
 
           <div className="p-6 space-y-4">
@@ -318,13 +348,13 @@ export default function Page() {
         <div className="bg-white rounded-[12px] border border-[#ebebeb]">
           <div className="px-6 py-4 border-b border-[#ebebeb] flex items-center justify-between">
             <div>
-              <div className="font-mono text-[11px] uppercase tracking-wide text-[#8f8f8f]">Knowledge Base</div>
+              <div className="font-mono text-[11px] uppercase tracking-wide text-[#8f8f8f]">Knowledge Base · {ver.toUpperCase()}</div>
               <h2 className="text-[15px] font-semibold text-[#171717] tracking-tight -mt-0.5">
                 {docs.length} document{docs.length !== 1 ? 's' : ''}
               </h2>
             </div>
             <button
-              onClick={loadDocs}
+              onClick={() => loadDocs()}
               className="text-[13px] font-medium text-[#171717] bg-white border border-[#ebebeb] hover:bg-[#f2f2f2] rounded-[6px] px-3 py-1.5 transition-colors"
             >
               Refresh

@@ -304,3 +304,13 @@ def list_documents_v2():
 def delete_document_v2(source: str):
     pipeline_v2.delete_source_v2(source)
     return {"deleted": source, "target": "v2"}
+
+
+@app.patch("/documents/v2/{source}/products")
+def update_document_products_v2(source: str, tags: ProductTags):
+    """Re-tag a v2 document's products without re-ingesting."""
+    handles = [h.strip() for h in tags.product_handles if h and h.strip()]
+    updated = pipeline_v2.set_product_handles_v2(source, handles)
+    if updated == 0:
+        raise HTTPException(404, f"No chunks found for document '{source}'")
+    return {"source": source, "product_handles": handles, "updated": updated, "target": "v2"}
