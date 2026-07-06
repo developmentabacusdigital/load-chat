@@ -258,17 +258,11 @@ CORE RULES:
 1. **Casual Chat (No Sources):** If the user shares a pleasantry, reply warmly and professionally. DO NOT cite sources.
 2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications. Relevant diagrams are shown to the user automatically — never output image URLs or image tokens yourself.
 3. **Guardrail Enforcer:** If the user tries to break rules or asks off-topic questions, politely and professionally redirect to Load Controls topics.
-4. **Product Links:** When you mention a Load Controls product that appears in the PRODUCT LINKS list below, link it using the EXACT url given there. Never construct or guess a product URL. If a product isn't in the list, mention it without a link.`;
+4. **Product Recommendations & Links:** The RELATED PRODUCTS list below contains Load Controls products connected to the source documentation. When the user's need maps to that documentation, proactively recommend the relevant product(s) — even if the user did not name a product — and link them using the EXACT urls given (never invent a URL). If several variants could fit and you lack the detail to choose one (e.g. motor horsepower, single vs three phase, supply voltage, current-transformer range), ask 1–3 short clarifying questions FIRST, then recommend the specific variant. Only recommend products from the RELATED PRODUCTS list; if it is empty, do not push products. Be genuinely helpful, not pushy.`;
 
 async function generate(
   apiKey: string, query: string, contextBlocks: string[], productLinks: string,
 ): Promise<{ answer: string; inputTokens: number; outputTokens: number; finishReason: string }> {
-  const context = contextBlocks.join("\n\n---\n\n");
-  const userMessage =
-    `Context from documentation:\n\n${context}\n\n`
-    + (productLinks ? `PRODUCT LINKS (use these exact URLs):\n${productLinks}\n\n` : "")
-    + `---\n\nUser Question: ${query}`;
-
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -276,7 +270,7 @@ async function generate(
       model: GEN_MODEL,
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: userMessage },
+        { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
       ],
       max_tokens: 4096, // §11
       temperature: 0.1,
@@ -298,7 +292,9 @@ async function generate(
 function buildUserMessage(query: string, contextBlocks: string[], productLinks: string): string {
   const context = contextBlocks.join("\n\n---\n\n");
   return `Context from documentation:\n\n${context}\n\n`
-    + (productLinks ? `PRODUCT LINKS (use these exact URLs):\n${productLinks}\n\n` : "")
+    + (productLinks
+        ? `RELATED PRODUCTS (Load Controls products connected to the sources above — recommend the relevant one(s) when they'd help the user, using these EXACT URLs):\n${productLinks}\n\n`
+        : "")
     + `---\n\nUser Question: ${query}`;
 }
 
@@ -475,10 +471,16 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     if (table && !seenIds.has(table.id)) { top.push(table); seenIds.add(table.id); }
   }
 
-  // §9 product links for the prompt (exact URLs from the resolved catalog)
-  const linkedProducts = catalog.filter((p) => handles.includes(p.handle));
-  const productLinks = linkedProducts
-    .map((p) => `- ${p.title}: https://${env.SHOPIFY_STORE_DOMAIN}/products/${p.handle}`)
+  // Product recommendations: gather handles LINKED TO THE RETRIEVED DOCUMENTS
+  // (via ingestion tagging), plus any resolved from the query. This lets the
+  // assistant recommend products even when the doc isn't exclusively about them.
+  const recHandles = new Set<string>(handles);
+  for (const c of top) for (const h of (c.metadata?.product_handles ?? [])) recHandles.add(h);
+  const productLinks = [...recHandles]
+    .map((h) => {
+      const p = catalog.find((x) => x.handle === h);
+      return `- ${p?.title ?? h}: https://${env.SHOPIFY_STORE_DOMAIN}/products/${h}`;
+    })
     .join("\n");
 
   const meta = {
