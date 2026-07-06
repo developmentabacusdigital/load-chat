@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Miss MoMo — Load Controls Assistant</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<style>
+  :root {
+    color-scheme: light;
+    --canvas:#fafafa; --elevated:#fff; --hairline:#ebebeb; --hairline-soft:#f2f2f2;
+    --ink:#171717; --body:#4d4d4d; --mute:#8f8f8f; --faint:#a1a1a1;
+    --link:#0070f3; --error:#ee0000; --brand:#d92b2b;
+    --sans:'Geist', Inter, -apple-system, system-ui, sans-serif;
+    --mono:'Geist Mono', ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--canvas); color: var(--ink); font-family: var(--sans);
+         display: flex; align-items: center; justify-content: center; padding: 20px; }
+
+  .chat { width: 100%; max-width: 560px; height: min(760px, 92vh); background: var(--elevated);
+          border: 1px solid var(--hairline); border-radius: 16px; display: flex; flex-direction: column;
+          overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,.04), 0 12px 32px -12px rgba(0,0,0,.12); }
+
+  /* Header */
+  .head { display: flex; align-items: center; gap: 12px; padding: 14px 16px; border-bottom: 1px solid var(--hairline); }
+  .avatar { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; background: var(--hairline-soft);
+            border: 1px solid var(--hairline); animation: float 4s ease-in-out infinite; }
+  @keyframes float { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+  .head .name { font-weight: 600; font-size: 15px; letter-spacing: -.2px; }
+  .head .status { font-size: 12px; color: var(--mute); display: flex; align-items: center; gap: 6px; }
+  .status .dot { width: 7px; height: 7px; border-radius: 50%; background: #22c55e; }
+  .status.busy .dot { background: #f5a623; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: .3; } }
+  .head .reset { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase;
+                 letter-spacing: .04em; color: var(--faint); background: none; border: 0; cursor: pointer; padding: 6px; }
+  .head .reset:hover { color: var(--ink); }
+
+  /* Messages */
+  .messages { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; }
+  .msg { display: flex; gap: 10px; max-width: 100%; }
+  .msg .mav { width: 30px; height: 30px; border-radius: 50%; object-fit: cover; flex-shrink: 0;
+              border: 1px solid var(--hairline); background: var(--hairline-soft); }
+  .bubble { padding: 10px 13px; border-radius: 14px; font-size: 14px; line-height: 1.55; max-width: 82%; }
+  .msg.ai .bubble { background: var(--hairline-soft); border: 1px solid var(--hairline); border-top-left-radius: 4px; color: var(--ink); }
+  .msg.user { flex-direction: row-reverse; }
+  .msg.user .bubble { background: var(--ink); color: #fff; border-top-right-radius: 4px; }
+
+  /* Thinking dots */
+  .dots { display: inline-flex; gap: 4px; padding: 4px 2px; }
+  .dots span { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); animation: bounce 1.3s infinite; }
+  .dots span:nth-child(2) { animation-delay: .18s; }
+  .dots span:nth-child(3) { animation-delay: .36s; }
+  @keyframes bounce { 0%,60%,100% { transform: translateY(0); opacity:.5; } 30% { transform: translateY(-5px); opacity:1; } }
+  .cursor { display: inline-block; width: .5ch; color: var(--mute); animation: blink 1s steps(1) infinite; }
+
+  /* Rich answer */
+  .answer > :first-child { margin-top: 0; } .answer > :last-child { margin-bottom: 0; }
+  .answer p { margin: 0 0 8px; }
+  .answer ul, .answer ol { margin: 0 0 8px; padding-left: 20px; }
+  .answer li { margin: 2px 0; }
+  .answer a { color: var(--link); text-decoration: none; border-bottom: 1px solid rgba(0,112,243,.3); }
+  .answer strong { font-weight: 600; }
+  .answer code { font-family: var(--mono); font-size: 12.5px; background: #fff; border: 1px solid var(--hairline); padding: 1px 5px; border-radius: 4px; }
+  .answer pre { background: #fff; border: 1px solid var(--hairline); padding: 10px; border-radius: 8px; overflow-x: auto; }
+  .answer pre code { border: 0; padding: 0; }
+  .answer table { border-collapse: collapse; margin: 6px 0; font-size: 12.5px; width: 100%; }
+  .answer th, .answer td { border: 1px solid var(--hairline); padding: 4px 7px; text-align: left; }
+  .answer th { background: #fff; font-weight: 600; }
+  img.diagram { max-width: 100%; border: 1px solid var(--hairline); border-radius: 8px; margin-top: 10px; display: block; }
+
+  /* Product cards */
+  .prodcards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+  .prodcard { display: flex; flex-direction: column; width: 118px; border: 1px solid var(--hairline);
+              border-radius: 10px; overflow: hidden; text-decoration: none; background: #fff; transition: border-color .15s, box-shadow .15s; }
+  .prodcard:hover { border-color: #d4d4d4; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+  .prodcard img { width: 100%; height: 90px; object-fit: contain; background: #fff; border-bottom: 1px solid var(--hairline); }
+  .prodcard .noimg { width: 100%; height: 90px; display: flex; align-items: center; justify-content: center;
+                     background: var(--hairline-soft); color: var(--mute); font-family: var(--mono); font-weight: 500; }
+  .pc-title { font-size: 12px; color: var(--ink); padding: 7px 8px; line-height: 1.3; }
+  .err { color: var(--error); font-size: 13px; }
+
+  /* Composer */
+  .composer { display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--hairline); background: var(--elevated); }
+  .composer input { flex: 1; font-family: var(--sans); font-size: 14px; color: var(--ink);
+                    background: var(--canvas); border: 1px solid var(--hairline); border-radius: 10px; padding: 11px 14px; outline: none; }
+  .composer input:focus { border-color: var(--ink); background: #fff; }
+  .composer button { width: 42px; border: 0; border-radius: 10px; background: var(--ink); color: #fff; font-size: 17px; cursor: pointer; transition: background .15s; }
+  .composer button:hover { background: #000; }
+  .composer button:disabled { opacity: .35; cursor: not-allowed; }
+</style>
+</head>
+<body>
+  <div class="chat">
+    <div class="head">
+      <img class="avatar" id="headAvatar" src="momo.gif" alt="Miss MoMo" />
+      <div>
+        <div class="name">Miss MoMo</div>
+        <div class="status" id="status"><span class="dot"></span><span id="statusText">Online · Load Controls Assistant</span></div>
+      </div>
+      <button class="reset" id="reset" title="Clear conversation">Reset</button>
+    </div>
+    <div class="messages" id="messages"></div>
+    <form class="composer" id="composer">
+      <input id="input" autocomplete="off" placeholder="Ask about products, wiring, installation…" />
+      <button id="send" type="submit" aria-label="Send">↑</button>
+    </form>
+  </div>
+
+<script>
+  var API = (new URLSearchParams(location.search).get("api") || "https://rag-worker.development-abacusdigital.workers.dev").replace(/\/+$/, "");
+  if (typeof marked !== "undefined") marked.setOptions({ breaks: true, gfm: true });
+
+  var convo = []; // {role, content} conversation memory sent to /chat/v2
+  var busy = false;
+
+  function el(id) { return document.getElementById(id); }
+  function esc(s) { return (s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
+  function scrollDown() { var m = el("messages"); m.scrollTop = m.scrollHeight; }
+
+  function setStatus(state) {
+    var s = el("status"), t = el("statusText"), a = el("headAvatar");
+    if (state === "thinking") { s.classList.add("busy"); t.textContent = "Thinking…"; a.src = "Thinking_Momo.gif"; }
+    else if (state === "typing") { s.classList.add("busy"); t.textContent = "Typing…"; a.src = "momo.gif"; }
+    else { s.classList.remove("busy"); t.textContent = "Online · Load Controls Assistant"; a.src = "momo.gif"; }
+  }
+
+  function addMessage(role) {
+    var wrap = document.createElement("div");
+    wrap.className = "msg " + role;
+    var inner = "";
+    if (role === "ai") inner += '<img class="mav" src="momo.gif" alt="" />';
+    inner += '<div class="bubble"></div>';
+    wrap.innerHTML = inner;
+    el("messages").appendChild(wrap);
+    scrollDown();
+    return wrap.querySelector(".bubble");
+  }
+
+  function renderAnswer(bubble, full, meta, streaming) {
+    var rendered = (typeof marked !== "undefined") ? marked.parse(full || "") : esc(full || "");
+    var html = '<div class="answer">' + rendered + (streaming ? '<span class="cursor">▍</span>' : "") + "</div>";
+    if (!streaming) {
+      // recommended product cards (only handles the answer actually linked)
+      var linked = ((full || "").match(/\/products\/([a-z0-9-]+)/g) || []).map(function (s) { return s.replace("/products/", ""); });
+      var seen = {}, recs = [];
+      ((meta && meta.product_candidates) || []).forEach(function (c) {
+        if (linked.indexOf(c.handle) !== -1 && !seen[c.handle]) { seen[c.handle] = 1; recs.push(c); }
+      });
+      if (recs.length) {
+        html += '<div class="prodcards">';
+        recs.forEach(function (c) {
+          html += '<a class="prodcard" href="' + esc(c.url) + '" target="_blank" rel="noopener">'
+            + (c.image ? '<img src="' + esc(c.image) + '" alt="" />'
+                       : '<div class="noimg">' + esc((c.title || c.handle).slice(0, 2).toUpperCase()) + '</div>')
+            + '<div class="pc-title">' + esc(c.title || c.handle) + '</div></a>';
+        });
+        html += '</div>';
+      } else {
+        ((meta && meta.images) || []).forEach(function (u) { html += '<img class="diagram" src="' + esc(u) + '" />'; });
+      }
+    }
+    bubble.innerHTML = html;
+    scrollDown();
+  }
+
+  async function streamReply(bubble, payload) {
+    bubble.innerHTML = '<div class="dots"><span></span><span></span><span></span></div>';
+    var full = "", meta = {}, started = false;
+    try {
+      var res = await fetch(API + "/chat/v2", {
+        method: "POST", headers: { "Content-Type": "application/json" }, cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok || !res.body) {
+        var txt = await res.text();
+        bubble.innerHTML = '<span class="err">Error ' + res.status + ": " + esc(txt.slice(0, 160)) + "</span>";
+        return { full: "" };
+      }
+      var reader = res.body.getReader(), dec = new TextDecoder(), buf = "";
+      for (;;) {
+        var r = await reader.read(); if (r.done) break;
+        buf += dec.decode(r.value, { stream: true });
+        var parts = buf.split("\n\n"); buf = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i].trim(); if (line.indexOf("data:") !== 0) continue;
+          var obj; try { obj = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+          if (obj.type === "meta") meta = obj;
+          else if (obj.type === "token") { if (!started) { started = true; setStatus("typing"); } full += obj.text; renderAnswer(bubble, full, meta, true); }
+          else if (obj.type === "error") { bubble.innerHTML = '<span class="err">' + esc(obj.error) + "</span>"; return { full: "" }; }
+        }
+      }
+      renderAnswer(bubble, full, meta, false);
+      return { full: full };
+    } catch (e) {
+      bubble.innerHTML = '<span class="err">Connection failed: ' + esc(String(e)) + "</span>";
+      return { full: "" };
+    }
+  }
+
+  async function send(text) {
+    if (busy) return;
+    var q = text.trim(); if (!q) return;
+    busy = true; el("send").disabled = true;
+
+    var ub = addMessage("user"); ub.textContent = q;
+    var histForV2 = convo.slice();
+    convo.push({ role: "user", content: q });
+
+    setStatus("thinking");
+    var bubble = addMessage("ai");
+    var r = await streamReply(bubble, { query: q, history: histForV2, stream: true });
+    if (r.full) convo.push({ role: "assistant", content: r.full });
+
+    setStatus("idle");
+    busy = false; el("send").disabled = false; el("input").focus();
+  }
+
+  function welcome() {
+    var b = addMessage("ai");
+    renderAnswer(b, "Hi, I'm **Miss MoMo** — your Load Controls assistant. Ask me about our products, wiring, installation, or settings, and I'll help you find the right solution.", {}, false);
+  }
+
+  el("composer").addEventListener("submit", function (e) { e.preventDefault(); var v = el("input").value; el("input").value = ""; send(v); });
+  el("reset").addEventListener("click", function () { convo = []; el("messages").innerHTML = ""; setStatus("idle"); welcome(); el("input").focus(); });
+
+  welcome();
+  el("input").focus();
+</script>
+</body>
+</html>
