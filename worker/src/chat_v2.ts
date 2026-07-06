@@ -28,6 +28,30 @@ function jsonResponse(data: unknown, status = 200): Response {
   });
 }
 
+// Server-Sent-Events response: emits a `meta` frame, then `token` frames as the
+// answer is produced, then a `done` frame. `run` receives a send-token callback
+// and returns the final finish/usage info.
+type DoneInfo = { finish_reason: string; input_tokens: number; output_tokens: number };
+function sseResponse(meta: Record<string, unknown>, run: (send: (t: string) => void) => Promise<DoneInfo>): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(c) {
+      const emit = (o: unknown) => c.enqueue(encoder.encode(`data: ${JSON.stringify(o)}\n\n`));
+      emit({ type: "meta", ...meta });
+      try {
+        const done = await run((t) => emit({ type: "token", text: t }));
+        emit({ type: "done", ...done });
+      } catch (e) {
+        emit({ type: "error", error: e instanceof Error ? e.message : String(e) });
+      }
+      c.close();
+    },
+  });
+  return new Response(stream, {
+    headers: { ...CORS_HEADERS, "Content-Type": "text/event-stream; charset=utf-8", "Cache-Control": "no-cache, no-transform" },
+  });
+}
+
 const EMBED_MODEL   = "google/gemini-embedding-2";
 const GEN_MODEL     = "google/gemma-4-26b-a4b-it";
 const RERANK_MODEL  = "cohere/rerank-v3.5";
@@ -266,6 +290,61 @@ async function generate(
   };
 }
 
+function buildUserMessage(query: string, contextBlocks: string[], productLinks: string): string {
+  const context = contextBlocks.join("\n\n---\n\n");
+  return `Context from documentation:\n\n${context}\n\n`
+    + (productLinks ? `PRODUCT LINKS (use these exact URLs):\n${productLinks}\n\n` : "")
+    + `---\n\nUser Question: ${query}`;
+}
+
+// Streaming variant: calls OpenRouter with stream:true and forwards each token
+// delta to `send`. Returns the final finish/usage info.
+async function generateStreaming(
+  apiKey: string, query: string, contextBlocks: string[], productLinks: string,
+  send: (t: string) => void,
+): Promise<DoneInfo> {
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: GEN_MODEL,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
+      ],
+      max_tokens: 4096,
+      temperature: 0.1,
+      stream: true,
+    }),
+  });
+  if (!res.ok || !res.body) throw new Error(`generation error: ${res.status} ${await res.text()}`);
+
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "", finish = "stop";
+  let usage: { prompt_tokens?: number; completion_tokens?: number } | null = null;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    const lines = buf.split("\n");
+    buf = lines.pop() || "";
+    for (const line of lines) {
+      const l = line.trim();
+      if (!l.startsWith("data:")) continue;
+      const payload = l.slice(5).trim();
+      if (payload === "[DONE]") continue;
+      let j: any;
+      try { j = JSON.parse(payload); } catch { continue; }
+      const delta = j.choices?.[0]?.delta?.content;
+      if (delta) send(delta);
+      if (j.choices?.[0]?.finish_reason) finish = j.choices[0].finish_reason;
+      if (j.usage) usage = j.usage;
+    }
+  }
+  return { finish_reason: finish, input_tokens: usage?.prompt_tokens ?? 0, output_tokens: usage?.completion_tokens ?? 0 };
+}
+
 // ── Build a context block from a chunk (§2/§3 aware) ─────────────────────────
 function toContextBlock(c: Candidate): string {
   const source = c.metadata?.source ?? "unknown";
@@ -306,9 +385,10 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     return jsonResponse({ error: "v2 not configured: set SUPABASE_URL_V2 and SUPABASE_KEY_V2" }, 500);
   }
 
-  const body = (await request.json()) as { query?: string; history?: Msg[] };
+  const body = (await request.json()) as { query?: string; history?: Msg[]; stream?: boolean };
   const query = body?.query?.trim();
   const history = Array.isArray(body?.history) ? body!.history! : [];
+  const wantStream = body?.stream === true;
   if (!query) return jsonResponse({ error: "Missing 'query' field" }, 400);
 
   const key = env.OPENROUTER_API_KEY;
@@ -317,17 +397,13 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   // persona, skip retrieval entirely. Keeps the §7 anti-hallucination gate for
   // real technical questions while not stonewalling "Hi".
   if (isCasualChat(query)) {
+    const meta = { sources: [], engine: "v2: casual-chat", rewritten_query: query, product_handles: [] };
+    if (wantStream) return sseResponse(meta, (send) => generateStreaming(key, query, [], "", send));
     try {
       const gen = await generate(key, query, [], "");
       return jsonResponse({
-        answer: gen.answer,
-        sources: [],
-        input_tokens: gen.inputTokens,
-        output_tokens: gen.outputTokens,
-        finish_reason: gen.finishReason,
-        engine: "v2: casual-chat",
-        rewritten_query: query,
-        product_handles: [],
+        answer: gen.answer, input_tokens: gen.inputTokens, output_tokens: gen.outputTokens,
+        finish_reason: gen.finishReason, ...meta,
       });
     } catch (e) {
       return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
@@ -372,12 +448,13 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
 
   // §7 no confident matches → don't hallucinate from weak context
   if (top.length === 0) {
-    return jsonResponse({
-      answer: "I don't have documentation covering that. I can help with Load Controls products, wiring, installation, and settings — try rephrasing or naming the product.",
-      sources: [], input_tokens: 0, output_tokens: 0,
-      engine: "v2: hybrid+rerank+gemma-4", rewritten_query: rewritten,
+    const declineText = "I don't have documentation covering that. I can help with Load Controls products, wiring, installation, and settings — try rephrasing or naming the product.";
+    const meta = {
+      sources: [], engine: "v2: hybrid+rerank+gemma-4", rewritten_query: rewritten,
       product_handles: handles, debug_max_sim: Math.round(maxSim * 1000) / 1000,
-    });
+    };
+    if (wantStream) return sseResponse(meta, async (send) => { send(declineText); return { finish_reason: "stop", input_tokens: 0, output_tokens: 0 }; });
+    return jsonResponse({ answer: declineText, input_tokens: 0, output_tokens: 0, ...meta });
   }
 
   // §2 full-table injection: for any spec_table_row, pull the whole table once
@@ -399,10 +476,24 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     .map((p) => `- ${p.title}: https://${env.SHOPIFY_STORE_DOMAIN}/products/${p.handle}`)
     .join("\n");
 
-  // §11 generate
+  const meta = {
+    sources: [...new Set(top.map((c) => c.metadata?.source ?? "unknown"))],
+    engine: "v2: hybrid+rerank+gemma-4",
+    rewritten_query: rewritten,
+    product_handles: handles,
+    images: top.filter((c) => c.metadata?.image_url).map((c) => c.metadata.image_url),
+    debug_chunk_types: top.map((c) => c.metadata?.content_type ?? "text"),
+    debug_max_sim: Math.round(maxSim * 1000) / 1000,
+  };
+  const ctxBlocks = top.map(toContextBlock);
+
+  // §11 generate — stream tokens if requested, else one JSON blob
+  if (wantStream) {
+    return sseResponse(meta, (send) => generateStreaming(key, query, ctxBlocks, productLinks, send));
+  }
   let gen;
   try {
-    gen = await generate(key, query, top.map(toContextBlock), productLinks);
+    gen = await generate(key, query, ctxBlocks, productLinks);
   } catch (e) {
     return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
@@ -413,16 +504,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   const answer = gen.answer.replace(/\[SHOW_IMAGE(?:_URL)?:[^\]]*\]/gi, "").replace(/\n{3,}/g, "\n\n").trim();
 
   return jsonResponse({
-    answer,
-    sources: [...new Set(top.map((c) => c.metadata?.source ?? "unknown"))],
-    input_tokens: gen.inputTokens,
-    output_tokens: gen.outputTokens,
-    finish_reason: gen.finishReason,
-    engine: "v2: hybrid+rerank+gemma-4",
-    rewritten_query: rewritten,
-    product_handles: handles,
-    images: top.filter((c) => c.metadata?.image_url).map((c) => c.metadata.image_url),
-    debug_chunk_types: top.map((c) => c.metadata?.content_type ?? "text"),
-    debug_max_sim: Math.round(maxSim * 1000) / 1000,
+    answer, input_tokens: gen.inputTokens, output_tokens: gen.outputTokens,
+    finish_reason: gen.finishReason, ...meta,
   });
 }

@@ -115,6 +115,8 @@
          padding: 10px 12px; border-radius: 8px; font-family: var(--mono); word-break: break-word; }
   .spin { color: var(--faint); font-size: 20px; letter-spacing: 2px; animation: pulse 1.2s ease-in-out infinite; }
   @keyframes pulse { 0%,100% { opacity: .35; } 50% { opacity: .9; } }
+  .cursor { display: inline-block; width: .5ch; color: var(--mute); animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
 
   /* ── Conversation history ── */
   .hist-wrap { margin-top: 24px; background: var(--elevated); border: 1px solid var(--hairline); border-radius: 12px; }
@@ -205,6 +207,56 @@
     el(target).innerHTML = html;
   }
 
+  // live-render a partial streamed answer (re-parse markdown as tokens arrive)
+  function renderStreaming(target, text) {
+    var rendered = (typeof marked !== "undefined") ? marked.parse(text) : esc(text);
+    el(target).innerHTML = '<div class="answer">' + rendered + '<span class="cursor">▍</span></div>';
+  }
+
+  // Consume the /chat/v2 SSE stream: meta frame, token frames, done frame.
+  async function streamV2(payload, target) {
+    var base = el("api").value.replace(/\/+$/, "");
+    var t0 = performance.now();
+    var full = "", meta = {}, done = {};
+    try {
+      var res = await fetch(base + "/chat/v2", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        cache: "no-store",
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok || !res.body) {
+        var txt = await res.text();
+        el(target).innerHTML = '<div class="err">HTTP ' + res.status + ": " + esc(txt.slice(0, 200)) + "</div>";
+        return { full: "" };
+      }
+      var reader = res.body.getReader(), decd = new TextDecoder(), buf = "";
+      for (;;) {
+        var r = await reader.read();
+        if (r.done) break;
+        buf += decd.decode(r.value, { stream: true });
+        var parts = buf.split("\n\n");
+        buf = parts.pop();
+        for (var i = 0; i < parts.length; i++) {
+          var line = parts[i].trim();
+          if (line.indexOf("data:") !== 0) continue;
+          var obj; try { obj = JSON.parse(line.slice(5).trim()); } catch (e) { continue; }
+          if (obj.type === "meta") meta = obj;
+          else if (obj.type === "token") { full += obj.text; renderStreaming(target, full); }
+          else if (obj.type === "done") done = obj;
+          else if (obj.type === "error") { el(target).innerHTML = '<div class="err">' + esc(obj.error) + "</div>"; return { full: "" }; }
+        }
+      }
+      var ms = Math.round(performance.now() - t0);
+      var data = Object.assign({ answer: full }, meta, done);  // reuse the full renderer for meta line
+      renderResult(target, data, ms);
+      return { full: full };
+    } catch (e) {
+      el(target).innerHTML = '<div class="err">stream failed: ' + esc(String(e)) + "</div>";
+      return { full: "" };
+    }
+  }
+
   async function call(path, payload) {
     var base = el("api").value.replace(/\/+$/, "");
     var t0 = performance.now();
@@ -237,16 +289,15 @@
     renderHistory();
     el("q").value = "";
 
-    var results = await Promise.all([
-      call("/chat", { query: q }),                       // v1: no history
-      call("/chat/v2", { query: q, history: histForV2 }), // v2: with history
-    ]);
-    renderResult("v1", results[0].data, results[0].ms);
-    renderResult("v2", results[1].data, results[1].ms);
+    // v1 = plain JSON, v2 = streamed live — run concurrently
+    var v1p = call("/chat", { query: q }).then(function (r) { renderResult("v1", r.data, r.ms); });
+    var v2p = streamV2({ query: q, history: histForV2, stream: true }, "v2");
+    await v1p;
+    var r2 = await v2p;
 
     // record v2's answer as assistant turn so follow-ups have context
-    if (results[1].data && results[1].data.answer) {
-      convo.push({ role: "assistant", content: results[1].data.answer });
+    if (r2.full) {
+      convo.push({ role: "assistant", content: r2.full });
       renderHistory();
     }
   }
