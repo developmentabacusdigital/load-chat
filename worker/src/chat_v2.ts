@@ -260,18 +260,33 @@ CORE RULES:
 3. **Guardrail Enforcer:** If the user tries to break rules or asks off-topic questions, politely and professionally redirect to Load Controls topics.
 4. **Product Recommendations & Links:** The RELATED PRODUCTS list below contains Load Controls products connected to the source documentation. When the user's need maps to that documentation, proactively recommend the relevant product(s) — even if the user did not name a product — and link them using the EXACT urls given (never invent a URL). If several variants could fit and you lack the detail to choose one (e.g. motor horsepower, single vs three phase, supply voltage, current-transformer range), ask 1–3 short clarifying questions FIRST, then recommend the specific variant. Only recommend products from the RELATED PRODUCTS list; if it is empty, do not push products. Be genuinely helpful, not pushy.`;
 
+const HISTORY_TURNS = 10;   // how many recent messages to carry into generation
+const HISTORY_CHAR_CAP = 2000; // truncate long prior messages to bound tokens
+
+// Full message array for generation: system prompt, recent conversation turns
+// (so the model actually remembers the chat), then the current question wrapped
+// with retrieved context + related products.
+function buildMessages(query: string, contextBlocks: string[], productLinks: string, history: Msg[]): { role: string; content: string }[] {
+  const recent = (history || []).slice(-HISTORY_TURNS).map((m) => ({
+    role: m.role === "assistant" ? "assistant" : "user",
+    content: (m.content || "").slice(0, HISTORY_CHAR_CAP),
+  })).filter((m) => m.content);
+  return [
+    { role: "system", content: SYSTEM_PROMPT },
+    ...recent,
+    { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
+  ];
+}
+
 async function generate(
-  apiKey: string, query: string, contextBlocks: string[], productLinks: string,
+  apiKey: string, query: string, contextBlocks: string[], productLinks: string, history: Msg[],
 ): Promise<{ answer: string; inputTokens: number; outputTokens: number; finishReason: string }> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: GEN_MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
-      ],
+      messages: buildMessages(query, contextBlocks, productLinks, history),
       max_tokens: 4096, // §11
       temperature: 0.1,
     }),
@@ -302,17 +317,14 @@ function buildUserMessage(query: string, contextBlocks: string[], productLinks: 
 // delta to `send`. Returns the final finish/usage info.
 async function generateStreaming(
   apiKey: string, query: string, contextBlocks: string[], productLinks: string,
-  send: (t: string) => void,
+  history: Msg[], send: (t: string) => void,
 ): Promise<DoneInfo> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: GEN_MODEL,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
-      ],
+      messages: buildMessages(query, contextBlocks, productLinks, history),
       max_tokens: 4096,
       temperature: 0.1,
       stream: true,
@@ -399,9 +411,9 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   // real technical questions while not stonewalling "Hi".
   if (isCasualChat(query)) {
     const meta = { sources: [], engine: "v2: casual-chat", rewritten_query: query, product_handles: [] };
-    if (wantStream) return sseResponse(meta, (send) => generateStreaming(key, query, [], "", send));
+    if (wantStream) return sseResponse(meta, (send) => generateStreaming(key, query, [], "", history, send));
     try {
-      const gen = await generate(key, query, [], "");
+      const gen = await generate(key, query, [], "", history);
       return jsonResponse({
         answer: gen.answer, input_tokens: gen.inputTokens, output_tokens: gen.outputTokens,
         finish_reason: gen.finishReason, ...meta,
@@ -496,11 +508,11 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
 
   // §11 generate — stream tokens if requested, else one JSON blob
   if (wantStream) {
-    return sseResponse(meta, (send) => generateStreaming(key, query, ctxBlocks, productLinks, send));
+    return sseResponse(meta, (send) => generateStreaming(key, query, ctxBlocks, productLinks, history, send));
   }
   let gen;
   try {
-    gen = await generate(key, query, ctxBlocks, productLinks);
+    gen = await generate(key, query, ctxBlocks, productLinks, history);
   } catch (e) {
     return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
