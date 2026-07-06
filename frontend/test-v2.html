@@ -224,9 +224,10 @@
           + '<div class="pc-title">' + esc(c.title || c.handle) + '</div></a>';
       });
       html += '</div>';
+    } else {
+      // Only show document diagram images when NOT recommending a product
+      (data.images || []).forEach(function (u) { html += '<img class="diagram" src="' + esc(u) + '" />'; });
     }
-
-    (data.images || []).forEach(function (u) { html += '<img class="diagram" src="' + esc(u) + '" />'; });
     html += '<div class="meta">';
     html += "⏱ " + ms + "ms · in " + (data.input_tokens || 0) + " / out " + (data.output_tokens || 0);
     if (data.finish_reason) html += " · finish=<code>" + esc(data.finish_reason) + "</code>";
