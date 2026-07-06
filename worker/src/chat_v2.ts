@@ -105,11 +105,11 @@ async function embedQuery(apiKey: string, text: string): Promise<number[]> {
 }
 
 // ── §9 Product-handle resolution ─────────────────────────────────────────────
-type Product = { title: string; handle: string };
+type Product = { title: string; handle: string; image?: string };
 
 async function fetchProductCatalog(env: Env): Promise<Product[]> {
   if (!env.SHOPIFY_STORE_DOMAIN || !env.SHOPIFY_STOREFRONT_TOKEN) return [];
-  const query = `{ products(first: 250) { edges { node { title handle } } } }`;
+  const query = `{ products(first: 250) { edges { node { title handle featuredImage { url } } } } }`;
   try {
     const res = await fetch(`https://${env.SHOPIFY_STORE_DOMAIN}/api/2024-01/graphql.json`, {
       method: "POST",
@@ -125,6 +125,7 @@ async function fetchProductCatalog(env: Env): Promise<Product[]> {
     return (json.data?.products?.edges ?? []).map((e: any) => ({
       title: e.node.title,
       handle: e.node.handle,
+      image: e.node.featuredImage?.url,
     }));
   } catch {
     return [];
@@ -488,12 +489,16 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   // assistant recommend products even when the doc isn't exclusively about them.
   const recHandles = new Set<string>(handles);
   for (const c of top) for (const h of (c.metadata?.product_handles ?? [])) recHandles.add(h);
-  const productLinks = [...recHandles]
-    .map((h) => {
-      const p = catalog.find((x) => x.handle === h);
-      return `- ${p?.title ?? h}: https://${env.SHOPIFY_STORE_DOMAIN}/products/${h}`;
-    })
-    .join("\n");
+  const productCandidates = [...recHandles].map((h) => {
+    const p = catalog.find((x) => x.handle === h);
+    return {
+      title: p?.title ?? h,
+      handle: h,
+      url: `https://${env.SHOPIFY_STORE_DOMAIN}/products/${h}`,
+      image: p?.image ?? null,
+    };
+  });
+  const productLinks = productCandidates.map((p) => `- ${p.title}: ${p.url}`).join("\n");
 
   const meta = {
     sources: [...new Set(top.map((c) => c.metadata?.source ?? "unknown"))],
@@ -501,6 +506,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     rewritten_query: rewritten,
     product_handles: handles,
     images: top.filter((c) => c.metadata?.image_url).map((c) => c.metadata.image_url),
+    product_candidates: productCandidates,
     debug_chunk_types: top.map((c) => c.metadata?.content_type ?? "text"),
     debug_max_sim: Math.round(maxSim * 1000) / 1000,
   };
