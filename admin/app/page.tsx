@@ -21,25 +21,46 @@ export default function Page() {
   const [uploading, setUploading] = useState(false)
   const [status, setStatus]       = useState<{ type: StatusType; msg: string }>({ type: 'idle', msg: '' })
   const [deleting, setDeleting]   = useState<string | null>(null)
+  // Per-document product-tag editing (in-place, no re-ingest)
+  const [savingSource, setSavingSource] = useState<string | null>(null)  // doc being PATCHed
+  const [addingFor, setAddingFor]       = useState<string | null>(null)  // doc whose add-popover is open
+  const [addSelected, setAddSelected]   = useState<string[]>([])         // multi-select staging
+  const [addSearch, setAddSearch]       = useState('')
+  // Which knowledge base the admin is managing: v1 (live) or v2 (A/B project)
+  const [ver, setVer] = useState<'v1' | 'v2'>('v1')
   const fileRef  = useRef<HTMLInputElement>(null)
   const dropRef  = useRef<HTMLDivElement>(null)
+  const addRef   = useRef<HTMLDivElement>(null)
+
+  // Route bases per active version. v1: /documents, /ingest ; v2: /documents/v2, /ingest/v2
+  const docBase    = ver === 'v2' ? '/documents/v2' : '/documents'
+  const ingestPath = ver === 'v2' ? '/ingest/v2' : '/ingest'
 
   useEffect(() => {
     fetch('/api/products').then(r => r.json()).then(setProducts).catch(() => {})
-    loadDocs()
   }, [])
 
-  // Close dropdown when clicking outside
+  // (Re)load documents whenever the active version changes
+  useEffect(() => {
+    loadDocs(ver)
+    closeAdd()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ver])
+
+  // Close dropdowns / popovers when clicking outside
   useEffect(() => {
     function handler(e: MouseEvent) {
-      if (dropRef.current && !dropRef.current.contains(e.target as Node)) setShowDrop(false)
+      const t = e.target as Node
+      if (dropRef.current && !dropRef.current.contains(t)) setShowDrop(false)
+      if (addRef.current && !addRef.current.contains(t)) closeAdd()
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  function loadDocs() {
-    fetch(`${HF_URL}/documents`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
+  function loadDocs(v: 'v1' | 'v2' = ver) {
+    const base = v === 'v2' ? '/documents/v2' : '/documents'
+    fetch(`${HF_URL}${base}`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
       .then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
   }
 
@@ -63,7 +84,7 @@ export default function Page() {
       form.append('file', file)
       form.append('product_handles', selected.join(','))
       form.append('replace', String(replace))
-      const r    = await fetch(`${HF_URL}/ingest`, {
+      const r    = await fetch(`${HF_URL}${ingestPath}`, {
         method: 'POST',
         headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
         body: form,
@@ -84,14 +105,62 @@ export default function Page() {
   }
 
   async function handleDelete(source: string) {
-    if (!confirm(`Delete all knowledge from "${source}"? This cannot be undone.`)) return
+    if (!confirm(`Delete all knowledge from "${source}" (${ver.toUpperCase()})? This cannot be undone.`)) return
     setDeleting(source)
-    await fetch(`${HF_URL}/documents/${encodeURIComponent(source)}`, {
+    await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
     })
     setDeleting(null)
     loadDocs()
+  }
+
+  // Core: persist a document's full handle list, update the row optimistically.
+  async function patchHandles(source: string, handles: string[]) {
+    setSavingSource(source)
+    const prev = docs.find(d => d.source === source)?.product_handles ?? []
+    setDocs(ds => ds.map(d => d.source === source ? { ...d, product_handles: handles } : d))
+    try {
+      const r = await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}/products`, {
+        method: 'PATCH',
+        headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ product_handles: handles }),
+      })
+      if (!r.ok) throw new Error((await r.text()).slice(0, 200))
+    } catch (e: unknown) {
+      setDocs(ds => ds.map(d => d.source === source ? { ...d, product_handles: prev } : d))  // rollback
+      setStatus({ type: 'error', msg: e instanceof Error ? e.message : 'Failed to update tags' })
+    } finally {
+      setSavingSource(null)
+    }
+  }
+
+  function removeProduct(source: string, handle: string) {
+    const current = docs.find(d => d.source === source)?.product_handles ?? []
+    patchHandles(source, current.filter(h => h !== handle))
+  }
+
+  function openAdd(source: string) {
+    setAddingFor(source)
+    setAddSelected([])
+    setAddSearch('')
+  }
+
+  function closeAdd() {
+    setAddingFor(null)
+    setAddSelected([])
+    setAddSearch('')
+  }
+
+  function toggleAddSelect(handle: string) {
+    setAddSelected(s => s.includes(handle) ? s.filter(h => h !== handle) : [...s, handle])
+  }
+
+  async function confirmAdd(source: string) {
+    const current = docs.find(d => d.source === source)?.product_handles ?? []
+    const merged = [...current, ...addSelected.filter(h => !current.includes(h))]
+    closeAdd()
+    await patchHandles(source, merged)
   }
 
   const filtered = products.filter(p =>
@@ -117,17 +186,34 @@ export default function Page() {
             <h1 className="text-lg font-bold text-gray-900 leading-tight">Miss MoMo Admin</h1>
             <p className="text-xs text-gray-400">Load Controls knowledge base</p>
           </div>
-          <div className="ml-auto flex items-center gap-1.5 text-xs font-medium text-green-700 bg-green-50 border border-green-100 px-3 py-1 rounded-full">
-            <span className="w-1.5 h-1.5 rounded-full bg-green-500 inline-block"></span>
-            Connected
+
+          {/* v1 / v2 knowledge-base toggle */}
+          <div className="ml-auto inline-flex items-center p-0.5 rounded-[8px] border border-[#ebebeb] bg-[#f2f2f2]">
+            {(['v1', 'v2'] as const).map(v => (
+              <button
+                key={v}
+                onClick={() => setVer(v)}
+                title={v === 'v1' ? 'Live project (crnwhln…)' : 'A/B project (bwsqmht…)'}
+                className={`text-[12px] font-medium px-3 py-1 rounded-[6px] transition-colors ${
+                  ver === v ? 'bg-white text-[#171717] shadow-sm' : 'text-[#8f8f8f] hover:text-[#171717]'
+                }`}
+              >
+                {v.toUpperCase()}
+              </button>
+            ))}
           </div>
         </div>
 
         {/* Upload card */}
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
-          <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl">
-            <h2 className="font-semibold text-gray-800">Upload Document</h2>
-            <p className="text-xs text-gray-400 mt-0.5">PDF files only · Parsed with Docling · Embedded with Gemini Embedding 2</p>
+          <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold text-gray-800">Upload Document</h2>
+              <p className="text-xs text-gray-400 mt-0.5">PDF files only · Parsed with Docling · Embedded with Gemini Embedding 2</p>
+            </div>
+            <span className="text-[11px] font-mono uppercase tracking-wide text-[#8f8f8f] bg-[#f2f2f2] border border-[#ebebeb] px-2 py-1 rounded-[6px] whitespace-nowrap">
+              → {ver.toUpperCase()} {ver === 'v2' ? 'hybrid pipeline' : 'knowledge base'}
+            </span>
           </div>
 
           <div className="p-6 space-y-4">
@@ -258,57 +344,166 @@ export default function Page() {
           </div>
         </div>
 
-        {/* Documents table */}
-        <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="font-semibold text-gray-800">Knowledge Base</h2>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-gray-400">{docs.length} document{docs.length !== 1 ? 's' : ''}</span>
-              <button onClick={loadDocs} className="text-xs text-gray-400 hover:text-gray-700 transition-colors">↻ Refresh</button>
+        {/* Knowledge Base */}
+        <div className="bg-white rounded-[12px] border border-[#ebebeb]">
+          <div className="px-6 py-4 border-b border-[#ebebeb] flex items-center justify-between">
+            <div>
+              <div className="font-mono text-[11px] uppercase tracking-wide text-[#8f8f8f]">Knowledge Base · {ver.toUpperCase()}</div>
+              <h2 className="text-[15px] font-semibold text-[#171717] tracking-tight -mt-0.5">
+                {docs.length} document{docs.length !== 1 ? 's' : ''}
+              </h2>
             </div>
+            <button
+              onClick={() => loadDocs()}
+              className="text-[13px] font-medium text-[#171717] bg-white border border-[#ebebeb] hover:bg-[#f2f2f2] rounded-[6px] px-3 py-1.5 transition-colors"
+            >
+              Refresh
+            </button>
           </div>
 
           {docs.length === 0 ? (
             <div className="px-6 py-16 text-center">
-              <div className="text-3xl mb-2">📭</div>
-              <div className="text-sm text-gray-400">No documents ingested yet. Upload one above.</div>
+              <div className="text-3xl mb-2 opacity-60">📭</div>
+              <div className="text-[13px] text-[#8f8f8f]">No documents ingested yet. Upload one above.</div>
             </div>
           ) : (
-            <div className="divide-y divide-gray-50">
-              {docs.map(doc => (
-                <div key={doc.source} className="px-6 py-4 flex items-start gap-3 hover:bg-gray-50/50 transition-colors">
-                  <span className="text-xl mt-0.5 flex-shrink-0">📄</span>
+            <div className="divide-y divide-[#ebebeb]">
+              {docs.map((doc, idx) => {
+                const handles   = doc.product_handles ?? []
+                const isSaving  = savingSource === doc.source
+                const isAdding  = addingFor === doc.source
+                const openUp    = docs.length > 2 && idx >= docs.length - 2  // flip last rows upward
+                const addFiltered = products.filter(p =>
+                  !handles.includes(p.handle) &&
+                  (p.title.toLowerCase().includes(addSearch.toLowerCase()) ||
+                   p.handle.toLowerCase().includes(addSearch.toLowerCase()))
+                )
+                return (
+                <div key={doc.source} className="px-6 py-4 flex items-start gap-3.5 hover:bg-[#fafafa] transition-colors last:rounded-b-[12px]">
+                  <span className="text-lg mt-0.5 flex-shrink-0 opacity-80">📄</span>
                   <div className="flex-1 min-w-0">
-                    <div className="font-medium text-sm text-gray-800 truncate">{doc.source}</div>
-                    <div className="flex flex-wrap gap-1 mt-1.5">
-                      {doc.product_handles?.length > 0
-                        ? doc.product_handles.map(h => {
-                            const p = products.find(p => p.handle === h)
-                            return (
-                              <span key={h} className="inline-flex items-center gap-1 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded-full">
-                                {p?.image && <img src={p.image} className="w-3 h-3 rounded-full object-cover" alt="" />}
-                                {p?.title ?? h}
-                              </span>
-                            )
-                          })
-                        : <span className="text-xs text-gray-300 italic">No products tagged</span>
-                      }
+                    <div className="flex items-center gap-2">
+                      <div className="font-medium text-[14px] text-[#171717] truncate">{doc.source}</div>
+                      {isSaving && (
+                        <svg className="animate-spin w-3.5 h-3.5 text-[#a1a1a1] flex-shrink-0" viewBox="0 0 24 24" fill="none">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3V0a12 12 0 100 24v-4l-3 3 3 3v4A12 12 0 014 12z"/>
+                        </svg>
+                      )}
+                    </div>
+
+                    {/* Connected product previews + add control */}
+                    <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                      {handles.map(h => {
+                        const p = products.find(p => p.handle === h)
+                        return (
+                          <div
+                            key={h}
+                            title={p?.title ?? h}
+                            className="group relative inline-flex items-center gap-1.5 bg-white border border-[#ebebeb] rounded-[6px] pl-1 pr-2 py-1 hover:border-[#d4d4d4] transition-colors"
+                          >
+                            {p?.image
+                              ? <img src={p.image} className="w-5 h-5 rounded-[4px] object-cover flex-shrink-0" alt="" />
+                              : <span className="w-5 h-5 rounded-[4px] bg-[#f2f2f2] text-[#8f8f8f] text-[9px] font-semibold flex items-center justify-center flex-shrink-0">
+                                  {(p?.title ?? h).slice(0, 2).toUpperCase()}
+                                </span>
+                            }
+                            <span className="text-[12px] text-[#171717] max-w-[150px] truncate">{p?.title ?? h}</span>
+                            <button
+                              onClick={() => removeProduct(doc.source, h)}
+                              disabled={isSaving}
+                              title="Remove"
+                              className="absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full bg-white border border-[#ebebeb] shadow-sm text-[#8f8f8f] hover:text-white hover:bg-[#ee0000] hover:border-[#ee0000] flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all disabled:opacity-0"
+                            >
+                              <svg width="7" height="7" viewBox="0 0 8 8" fill="none"><path d="M1 1l6 6M7 1l-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                            </button>
+                          </div>
+                        )
+                      })}
+
+                      {/* Add product */}
+                      <div className="relative" ref={isAdding ? addRef : undefined}>
+                        <button
+                          onClick={() => (isAdding ? closeAdd() : openAdd(doc.source))}
+                          disabled={isSaving}
+                          className="inline-flex items-center gap-1 text-[12px] font-medium text-[#4d4d4d] bg-white border border-dashed border-[#d4d4d4] hover:border-[#171717] hover:text-[#171717] rounded-[6px] px-2 py-1 transition-colors disabled:opacity-40"
+                        >
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                          Add product
+                        </button>
+
+                        {isAdding && (
+                          <div className={`absolute z-50 left-0 w-[300px] bg-white border border-[#ebebeb] rounded-[12px] shadow-[0px_2px_2px_rgba(0,0,0,0.04),0px_8px_16px_-4px_rgba(0,0,0,0.08)] overflow-hidden ${openUp ? 'bottom-full mb-1.5' : 'mt-1.5'}`}>
+                            <div className="p-2 border-b border-[#ebebeb]">
+                              <input
+                                autoFocus
+                                value={addSearch}
+                                onChange={e => setAddSearch(e.target.value)}
+                                placeholder={products.length ? 'Search products…' : 'No Shopify products loaded'}
+                                className="w-full text-[13px] text-[#171717] placeholder:text-[#a1a1a1] border border-[#ebebeb] rounded-[6px] px-2.5 py-1.5 focus:outline-none focus:border-[#171717] transition-colors"
+                              />
+                            </div>
+                            <div className="max-h-56 overflow-y-auto py-1">
+                              {addFiltered.length === 0 ? (
+                                <div className="px-3 py-6 text-center text-[12px] text-[#a1a1a1]">
+                                  {products.length ? 'No matching products' : 'Connect a Storefront token to load products'}
+                                </div>
+                              ) : addFiltered.map(p => {
+                                const checked = addSelected.includes(p.handle)
+                                return (
+                                  <button
+                                    key={p.handle}
+                                    onClick={() => toggleAddSelect(p.handle)}
+                                    className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-[#fafafa] transition-colors"
+                                  >
+                                    <span className={`w-4 h-4 rounded-[4px] border flex items-center justify-center flex-shrink-0 transition-colors ${checked ? 'bg-[#171717] border-[#171717]' : 'border-[#d4d4d4]'}`}>
+                                      {checked && <svg width="9" height="9" viewBox="0 0 10 10" fill="none"><path d="M1.5 5l2.5 2.5L8.5 2.5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+                                    </span>
+                                    {p.image
+                                      ? <img src={p.image} className="w-6 h-6 rounded-[4px] object-cover flex-shrink-0" alt="" />
+                                      : <span className="w-6 h-6 rounded-[4px] bg-[#f2f2f2] text-[#8f8f8f] text-[9px] font-semibold flex items-center justify-center flex-shrink-0">{p.title.slice(0,2).toUpperCase()}</span>
+                                    }
+                                    <span className="text-[13px] text-[#171717] flex-1 truncate">{p.title}</span>
+                                    <span className="text-[11px] text-[#a1a1a1] font-mono flex-shrink-0">{p.handle}</span>
+                                  </button>
+                                )
+                              })}
+                            </div>
+                            <div className="flex items-center justify-between gap-2 p-2 border-t border-[#ebebeb] bg-[#fafafa]">
+                              <button onClick={closeAdd} className="text-[13px] text-[#8f8f8f] hover:text-[#171717] px-2 py-1 transition-colors">Cancel</button>
+                              <button
+                                onClick={() => confirmAdd(doc.source)}
+                                disabled={addSelected.length === 0}
+                                className="text-[13px] font-medium text-white bg-[#171717] hover:bg-black disabled:opacity-30 disabled:cursor-not-allowed rounded-[6px] px-3 py-1.5 transition-colors"
+                              >
+                                Add{addSelected.length > 0 ? ` ${addSelected.length}` : ''}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {handles.length === 0 && !isAdding && (
+                        <span className="text-[12px] text-[#a1a1a1]">No products connected</span>
+                      )}
                     </div>
                   </div>
+
                   <button
                     onClick={() => handleDelete(doc.source)}
                     disabled={deleting === doc.source}
-                    className="flex-shrink-0 text-xs text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors px-3 py-1.5 rounded-lg disabled:opacity-40"
+                    className="flex-shrink-0 text-[12px] font-medium text-[#a1a1a1] hover:text-[#ee0000] hover:bg-[#fff0f0] transition-colors px-2.5 py-1.5 rounded-[6px] disabled:opacity-40"
                   >
-                    {deleting === doc.source ? '...' : 'Delete'}
+                    {deleting === doc.source ? '…' : 'Delete'}
                   </button>
                 </div>
-              ))}
+                )
+              })}
             </div>
           )}
         </div>
 
-        <p className="text-center text-xs text-gray-300">Miss MoMo Admin · Load Controls Inc.</p>
+        <p className="text-center font-mono text-[11px] uppercase tracking-wide text-[#a1a1a1]">Miss MoMo Admin · Load Controls Inc.</p>
       </div>
     </main>
   )
