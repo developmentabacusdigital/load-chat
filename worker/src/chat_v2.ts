@@ -105,11 +105,11 @@ async function embedQuery(apiKey: string, text: string): Promise<number[]> {
 }
 
 // ── §9 Product-handle resolution ─────────────────────────────────────────────
-type Product = { title: string; handle: string; image?: string };
+type Product = { title: string; handle: string; image?: string; url?: string };
 
 async function fetchProductCatalog(env: Env): Promise<Product[]> {
   if (!env.SHOPIFY_STORE_DOMAIN || !env.SHOPIFY_STOREFRONT_TOKEN) return [];
-  const query = `{ products(first: 250) { edges { node { title handle featuredImage { url } } } } }`;
+  const query = `{ products(first: 250) { edges { node { title handle onlineStoreUrl featuredImage { url } } } } }`;
   try {
     const res = await fetch(`https://${env.SHOPIFY_STORE_DOMAIN}/api/2024-01/graphql.json`, {
       method: "POST",
@@ -126,6 +126,7 @@ async function fetchProductCatalog(env: Env): Promise<Product[]> {
       title: e.node.title,
       handle: e.node.handle,
       image: e.node.featuredImage?.url,
+      url: e.node.onlineStoreUrl,   // Shopify's own canonical product URL
     }));
   } catch {
     return [];
@@ -532,7 +533,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     productCandidates.push({
       title: p?.title ?? h,
       handle,
-      url: `https://${linkDomain}/products/${handle}`,
+      url: p?.url || `https://${linkDomain}/products/${handle}`,   // Shopify's URL, else construct
       image: p?.image ?? null,
     });
   }
