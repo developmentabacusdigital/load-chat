@@ -314,3 +314,17 @@ def update_document_products_v2(source: str, tags: ProductTags):
     if updated == 0:
         raise HTTPException(404, f"No chunks found for document '{source}'")
     return {"source": source, "product_handles": handles, "updated": updated, "target": "v2"}
+
+
+class WebIngest(BaseModel):
+    urls: list[str]
+    replace: bool = True
+
+
+@app.post("/ingest/web")
+def ingest_web(body: WebIngest):
+    """Crawl + ingest a batch of website page URLs into the v2 knowledge base."""
+    import pipeline_web
+    results = pipeline_web.ingest_urls(body.urls, body.replace)
+    total = sum(r.get("chunks", 0) for r in results)
+    return {"pages": len(results), "chunks_saved": total, "results": results}
