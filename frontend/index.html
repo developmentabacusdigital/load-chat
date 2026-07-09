@@ -39,6 +39,9 @@
   .head .reset { margin-left: auto; font-family: var(--mono); font-size: 11px; text-transform: uppercase;
                  letter-spacing: .04em; color: var(--faint); background: none; border: 0; cursor: pointer; padding: 6px; }
   .head .reset:hover { color: var(--ink); }
+  .head .close { display: none; margin-left: 4px; width: 40px; height: 40px; align-items: center;
+                 justify-content: center; background: none; border: 0; color: var(--body); cursor: pointer; border-radius: 8px; }
+  .head .close:hover { background: var(--hairline-soft); color: var(--ink); }
 
   /* Messages */
   .messages { flex: 1; overflow-y: auto; padding: 20px 16px; display: flex; flex-direction: column; gap: 16px; }
@@ -103,6 +106,9 @@
     .composer { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
     .messages { padding: 16px 12px; }
     .bubble { max-width: 88%; }
+    /* When embedded as a widget, the full-screen iframe hides the launcher's
+       close button, so show an in-chat close on mobile. */
+    body.embedded .head .close { display: flex; }
   }
 </style>
 </head>
@@ -115,6 +121,9 @@
         <div class="status" id="status"><span class="dot"></span><span id="statusText">Online · Load Controls Assistant</span></div>
       </div>
       <button class="reset" id="reset" title="Clear conversation">Reset</button>
+      <button class="close" id="closeBtn" aria-label="Close chat" title="Close">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div class="messages" id="messages"></div>
     <form class="composer" id="composer">
@@ -238,6 +247,13 @@
 
   el("composer").addEventListener("submit", function (e) { e.preventDefault(); var v = el("input").value; el("input").value = ""; send(v); });
   el("reset").addEventListener("click", function () { convo = []; el("messages").innerHTML = ""; setStatus("idle"); welcome(); el("input").focus(); });
+
+  // If running inside the embed widget (iframe), enable the in-chat close button
+  // and have it ask the parent page to close the panel.
+  if (window.parent && window.parent !== window) document.body.classList.add("embedded");
+  el("closeBtn").addEventListener("click", function () {
+    try { window.parent.postMessage({ type: "missmomo-close" }, "*"); } catch (e) {}
+  });
 
   welcome();
   el("input").focus();
