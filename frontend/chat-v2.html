@@ -60,8 +60,10 @@
   .cursor { display: inline-block; width: .5ch; color: var(--mute); animation: blink 1s steps(1) infinite; }
 
   /* Rich answer */
+  .answer { overflow-wrap: anywhere; word-break: break-word; }
   .answer > :first-child { margin-top: 0; } .answer > :last-child { margin-bottom: 0; }
   .answer p { margin: 0 0 8px; }
+  .answer a { overflow-wrap: anywhere; word-break: break-word; }
   .answer ul, .answer ol { margin: 0 0 8px; padding-left: 20px; }
   .answer li { margin: 2px 0; }
   .answer a { color: var(--link); text-decoration: none; border-bottom: 1px solid rgba(0,112,243,.3); }
@@ -163,6 +165,7 @@
 
   function renderAnswer(bubble, full, meta, streaming) {
     var rendered = (typeof marked !== "undefined") ? marked.parse(full || "") : esc(full || "");
+    rendered = rendered.replace(/<a /g, '<a target="_blank" rel="noopener" ');  // links open in a new tab
     var html = '<div class="answer">' + rendered + (streaming ? '<span class="cursor">▍</span>' : "") + "</div>";
     if (!streaming) {
       // recommended product cards (only handles the answer actually linked)
