@@ -29,9 +29,9 @@
 
   // ── Animated floating launcher (the GIF) ──
   var btn = el("button",
-    "position:fixed;right:20px;bottom:20px;width:66px;height:66px;border-radius:50%;border:0;padding:0;" +
-    "overflow:hidden;background:#fff;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.22);" +
-    "z-index:" + Z + ";transition:transform .15s;");
+    "position:fixed;right:20px;bottom:20px;width:66px;height:66px;border-radius:50%;padding:0;" +
+    "border:3px solid #C6283D;box-sizing:border-box;overflow:hidden;background:#fff;cursor:pointer;" +
+    "box-shadow:0 6px 20px rgba(0,0,0,.22);z-index:" + Z + ";transition:transform .15s;");
   btn.id = "mm-btn";
   btn.setAttribute("aria-label", "Chat with Miss MoMo");
   btn.innerHTML = '<img src="' + GIF + '" alt="Miss MoMo" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;" />';
@@ -42,8 +42,8 @@
   var bubble = el("div",
     "position:fixed;right:22px;bottom:98px;max-width:250px;background:#fff;color:#171717;" +
     "padding:12px 30px 12px 14px;border-radius:14px;box-shadow:0 8px 28px rgba(0,0,0,.18);" +
-    "font:14px/1.45 " + SANS + ";z-index:" + Z + ";display:none;opacity:0;transform:translateY(8px);" +
-    "transition:opacity .25s,transform .25s;cursor:pointer;");
+    "font:14px/1.45 " + SANS + ";z-index:" + Z + ";display:none;opacity:0;" +
+    "transform-origin:bottom right;cursor:pointer;");
   bubble.id = "mm-bubble";
   bubble.innerHTML =
     '<span style="position:absolute;top:6px;right:8px;font-size:16px;line-height:1;color:#8f8f8f;' +
@@ -67,6 +67,7 @@
   // ── Responsive: full-screen panel on phones ──
   var style = el("style");
   style.textContent =
+    "@keyframes mm-pop{0%{opacity:0;transform:scale(.5)}55%{opacity:1;transform:scale(1.08)}75%{transform:scale(.97)}100%{opacity:1;transform:scale(1)}}" +
     "@media (max-width:640px){" +
     "  #mm-panel{right:0!important;bottom:0!important;width:100vw!important;height:100vh!important;height:100dvh!important;max-height:none!important;border-radius:0!important;}" +
     "  #mm-btn{right:16px!important;bottom:16px!important;}" +
@@ -74,7 +75,17 @@
     "}";
   document.head.appendChild(style);
 
-  function hideBubble() { bubble.style.opacity = "0"; bubble.style.transform = "translateY(8px)"; setTimeout(function () { bubble.style.display = "none"; }, 250); }
+  function showBubble() {
+    bubble.style.display = "block";
+    bubble.style.animation = "none";
+    requestAnimationFrame(function () { bubble.style.animation = "mm-pop .5s cubic-bezier(.2,.8,.3,1.1) forwards"; });
+  }
+  function hideBubble() {
+    bubble.style.animation = "none";
+    bubble.style.transition = "opacity .2s ease, transform .2s ease";
+    bubble.style.opacity = "0"; bubble.style.transform = "scale(.9)";
+    setTimeout(function () { bubble.style.display = "none"; }, 220);
+  }
 
   var open = false, loaded = false;
   function setOpen(v) {
@@ -110,8 +121,7 @@
         setTimeout(function () {
           if (open) return;
           sessionStorage.setItem("mm-greeted", "1");
-          bubble.style.display = "block";
-          requestAnimationFrame(function () { bubble.style.opacity = "1"; bubble.style.transform = "translateY(0)"; });
+          showBubble();
           setTimeout(function () { if (!open) hideBubble(); }, 12000); // auto-dismiss after a while
         }, delay);
       }
