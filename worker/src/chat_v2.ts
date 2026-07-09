@@ -440,6 +440,13 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   let candidates: Candidate[];
   try {
     candidates = await hybridRetrieve(env, embedding, rewritten, handles);
+    // The resolved handles come from the Shopify catalog, which may not match the
+    // handles the documents were tagged with (e.g. catalog "pmp-25-pump-load-control"
+    // vs tagged "pmp-25"). If the hard filter yields nothing, retry unfiltered so a
+    // product query never dead-ends — hybrid + rerank still handle relevance.
+    if (candidates.length === 0 && handles.length > 0) {
+      candidates = await hybridRetrieve(env, embedding, rewritten, []);
+    }
   } catch (e) {
     return jsonResponse({ error: `Retrieve failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
