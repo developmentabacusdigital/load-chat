@@ -489,12 +489,14 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   // assistant recommend products even when the doc isn't exclusively about them.
   const recHandles = new Set<string>(handles);
   for (const c of top) for (const h of (c.metadata?.product_handles ?? [])) recHandles.add(h);
+  // Public storefront domain for click-through links (falls back to the API domain).
+  const linkDomain = env.SHOPIFY_LINK_DOMAIN || env.SHOPIFY_STORE_DOMAIN;
   const productCandidates = [...recHandles].map((h) => {
     const p = catalog.find((x) => x.handle === h);
     return {
       title: p?.title ?? h,
       handle: h,
-      url: `https://${env.SHOPIFY_STORE_DOMAIN}/products/${h}`,
+      url: `https://${linkDomain}/products/${h}`,
       image: p?.image ?? null,
     };
   });

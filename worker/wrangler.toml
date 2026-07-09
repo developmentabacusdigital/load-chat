@@ -10,6 +10,7 @@ local_protocol = "http"
 [vars]
 SUPABASE_URL = "https://crnwhlnaiozvqlwavycm.supabase.co"      # v1 live (untouched)
 SUPABASE_URL_V2 = "https://bwsqmhtacmdmzscvjcqa.supabase.co"   # v2 A/B (new project)
-SHOPIFY_STORE_DOMAIN = "load-controls.myshopify.com"          # §9 product-handle filter + links
+SHOPIFY_STORE_DOMAIN = "load-controls.myshopify.com"          # Storefront API host (reliable)
+SHOPIFY_LINK_DOMAIN  = "www.loadcontrols.com"                # public storefront for product links
 # Secrets (SUPABASE_KEY, OPENROUTER_API_KEY, SUPABASE_KEY_V2, SHOPIFY_STOREFRONT_TOKEN)
 # are loaded from .dev.vars in local dev and `wrangler secret put` in prod.

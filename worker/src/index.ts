@@ -15,6 +15,7 @@ export interface Env {
   SUPABASE_URL_V2?: string;
   SUPABASE_KEY_V2?: string;
   SHOPIFY_STORE_DOMAIN?: string;
+  SHOPIFY_LINK_DOMAIN?: string;
   SHOPIFY_STOREFRONT_TOKEN?: string;
 }
 
