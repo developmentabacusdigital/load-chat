@@ -157,6 +157,30 @@ function resolveProductHandles(text: string, history: Msg[], catalog: Product[])
   return [...hits];
 }
 
+// Reconcile a (possibly short/tagged) handle to the real Shopify product. The
+// docs are tagged with short handles (e.g. "pmp-25-ct200") while the store's
+// handles are long slugs ("...-with-current-transformer-pmp-25-ct200"), so an
+// exact match misses the product's image/URL. Match by handle containment and
+// prefer the shortest (canonical) candidate.
+function matchCatalog(h: string, catalog: Product[]): Product | undefined {
+  const exact = catalog.find((p) => p.handle === h);
+  if (exact) return exact;
+  const hh = h.toLowerCase();
+  const cands = catalog.filter((p) => {
+    const ph = p.handle.toLowerCase();
+    return ph.endsWith("-" + hh) || ph.startsWith(hh + "-") || ph.includes("-" + hh + "-") || ph.includes(hh);
+  });
+  if (!cands.length) {
+    // last resort: normalized (hyphen/case-insensitive) containment
+    const hn = alnum(h);
+    const norm = catalog.filter((p) => alnum(p.handle).includes(hn) || alnum(p.title).includes(hn));
+    norm.sort((a, b) => a.handle.length - b.handle.length);
+    return norm[0];
+  }
+  cands.sort((a, b) => a.handle.length - b.handle.length);
+  return cands[0];
+}
+
 // ── §5+§6 Hybrid retrieval (RRF in SQL) ──────────────────────────────────────
 // v2 DB creds — validated present in handleChatV2 before any helper runs.
 function dbAuth(env: Env): { apikey: string; Authorization: string } {
@@ -498,15 +522,20 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   for (const c of top) for (const h of (c.metadata?.product_handles ?? [])) recHandles.add(h);
   // Public storefront domain for click-through links (falls back to the API domain).
   const linkDomain = env.SHOPIFY_LINK_DOMAIN || env.SHOPIFY_STORE_DOMAIN;
-  const productCandidates = [...recHandles].map((h) => {
-    const p = catalog.find((x) => x.handle === h);
-    return {
+  const seenHandle = new Set<string>();
+  const productCandidates: { title: string; handle: string; url: string; image: string | null }[] = [];
+  for (const h of recHandles) {
+    const p = matchCatalog(h, catalog);   // reconcile tagged handle → real catalog product (image + canonical URL)
+    const handle = p?.handle ?? h;
+    if (seenHandle.has(handle)) continue;
+    seenHandle.add(handle);
+    productCandidates.push({
       title: p?.title ?? h,
-      handle: h,
-      url: `https://${linkDomain}/products/${h}`,
+      handle,
+      url: `https://${linkDomain}/products/${handle}`,
       image: p?.image ?? null,
-    };
-  });
+    });
+  }
   const productLinks = productCandidates.map((p) => `- ${p.title}: ${p.url}`).join("\n");
 
   const meta = {
