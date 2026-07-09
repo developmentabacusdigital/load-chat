@@ -235,8 +235,32 @@ async function handleChat(
   });
 }
 
+// ── Keep-warm: touch the Supabase projects so the free tier doesn't go cold ──
+async function warmDatabases(env: Env): Promise<Record<string, number>> {
+  const targets: { name: string; url?: string; key?: string }[] = [
+    { name: "v2", url: env.SUPABASE_URL_V2, key: env.SUPABASE_KEY_V2 },
+    { name: "v1", url: env.SUPABASE_URL, key: env.SUPABASE_KEY },
+  ];
+  const out: Record<string, number> = {};
+  await Promise.all(targets.map(async (t) => {
+    if (!t.url || !t.key) { out[t.name] = 0; return; }
+    try {
+      const r = await fetch(`${t.url}/rest/v1/documents_gemini?select=id&limit=1`, {
+        headers: { apikey: t.key, Authorization: `Bearer ${t.key}` },
+      });
+      out[t.name] = r.status;
+    } catch { out[t.name] = -1; }
+  }));
+  return out;
+}
+
 // ── Main Worker Handler ──
 export default {
+  // Cron keep-warm (see wrangler.toml [triggers]) — pings the DBs on a schedule
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    ctx.waitUntil(warmDatabases(env).then((s) => console.log("[warmup cron]", JSON.stringify(s))));
+  },
+
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
 
@@ -246,6 +270,13 @@ export default {
 
     if (url.pathname === "/health") {
       return jsonResponse({ status: "ok", timestamp: new Date().toISOString() });
+    }
+
+    // Lightweight warm-up the widget can hit on page load, so the DB is awake
+    // by the time the visitor sends their first message.
+    if (url.pathname === "/warmup") {
+      const status = await warmDatabases(env);
+      return jsonResponse({ warmed: status });
     }
 
     if (url.pathname === "/chat" && request.method === "POST") {
