@@ -72,6 +72,11 @@
   }
   btn.onclick = function () { setOpen(!open); };
 
+  // The chatbot (in the iframe) posts this when its in-chat close button is tapped
+  window.addEventListener("message", function (e) {
+    if (e && e.data && e.data.type === "missmomo-close") setOpen(false);
+  });
+
   function mount() { document.body.appendChild(btn); document.body.appendChild(panel); }
   if (document.body) mount(); else document.addEventListener("DOMContentLoaded", mount);
 })();
