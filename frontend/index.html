@@ -241,6 +241,8 @@
 
   welcome();
   el("input").focus();
+  // wake the database in the background so the first reply isn't delayed by a cold start
+  fetch(API + "/warmup").catch(function () {});
 </script>
 </body>
 </html>
