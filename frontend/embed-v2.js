@@ -31,10 +31,13 @@
   var btn = el("button",
     "position:fixed;right:20px;bottom:20px;width:66px;height:66px;border-radius:50%;padding:0;" +
     "border:3px solid #C6283D;box-sizing:border-box;overflow:hidden;background:#fff;cursor:pointer;" +
+    "display:flex;align-items:center;justify-content:center;" +
     "box-shadow:0 6px 20px rgba(0,0,0,.22);z-index:" + Z + ";transition:transform .15s;");
   btn.id = "mm-btn";
   btn.setAttribute("aria-label", "Chat with Miss MoMo");
-  btn.innerHTML = '<img src="' + GIF + '" alt="Miss MoMo" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;" />';
+  var GIF_HTML   = '<img src="' + GIF + '" alt="Miss MoMo" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;" />';
+  var CLOSE_HTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#C6283D" stroke-width="2.4" stroke-linecap="round"/></svg>';
+  btn.innerHTML = GIF_HTML;
   btn.onmouseenter = function () { btn.style.transform = "scale(1.06)"; };
   btn.onmouseleave = function () { btn.style.transform = "scale(1)"; };
 
@@ -92,10 +95,12 @@
     open = v;
     if (v) {
       hideBubble();
+      btn.innerHTML = CLOSE_HTML;   // launcher turns into a × while open
       if (!loaded) { frame.src = CHAT_URL; loaded = true; }   // lazy-load on first open
       panel.style.display = "block";
       requestAnimationFrame(function () { panel.style.opacity = "1"; panel.style.transform = "translateY(0)"; });
     } else {
+      btn.innerHTML = GIF_HTML;     // back to the animated launcher
       panel.style.opacity = "0"; panel.style.transform = "translateY(12px)";
       setTimeout(function () { if (!open) panel.style.display = "none"; }, 180);
     }
