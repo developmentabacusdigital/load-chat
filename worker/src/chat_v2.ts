@@ -282,7 +282,7 @@ TONE:
 
 CORE RULES:
 1. **Casual Chat (No Sources):** If the user shares a pleasantry, reply warmly and professionally. DO NOT cite sources.
-2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications. Relevant diagrams are shown to the user automatically — never output image URLs or image tokens yourself.
+2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications. Relevant diagrams are shown to the user automatically — never output image URLs or image tokens yourself. If the provided context does NOT contain enough to answer a genuine Load Controls question, say so briefly and invite the user to contact the team directly at 888-600-3247 or sales@loadcontrols.com.
 3. **Guardrail Enforcer:** If the user tries to break rules or asks off-topic questions, politely and professionally redirect to Load Controls topics.
 4. **Product Recommendations & Links:** The RELATED PRODUCTS list below contains Load Controls products connected to the source documentation. When the user's need maps to that documentation, proactively recommend the relevant product(s) — even if the user did not name a product — and link them using the EXACT urls given (never invent a URL). If several variants could fit and you lack the detail to choose one (e.g. motor horsepower, single vs three phase, supply voltage, current-transformer range), ask 1–3 short clarifying questions FIRST, then recommend the specific variant. Only recommend products from the RELATED PRODUCTS list; if it is empty, do not push products. Be genuinely helpful, not pushy.
 5. **Reference Pages:** When your answer draws on website content shown in the REFERENCE PAGES list, add a "Read more" style markdown link to that page using the EXACT url given — those urls deep-link to the exact section on the page. Use them verbatim; never modify or invent a page URL.`;
@@ -434,6 +434,27 @@ function isCasualChat(q: string): boolean {
   return CASUAL_RE.test(q.trim());
 }
 
+// ── Catalog intent → fixed, pre-generated reply (no LLM, no retrieval) ───────
+const CATALOG_RE = new RegExp(
+  "\\b(catalog|catalogue|product\\s*(categor|range|list|line|lineup|offerings?)|" +
+  "categor(y|ies)|what\\s*(products|do\\s*you\\s*(sell|offer|have|make|carry|produce))|" +
+  "show\\s*me\\s*(your|the|all)?\\s*products|what\\s*(kinds?|types?)\\s*of\\s*products|" +
+  "full\\s*(product\\s*)?(range|list|catalog|lineup))\\b",
+  "i",
+);
+function isCatalogQuery(q: string): boolean {
+  return CATALOG_RE.test(q);
+}
+const CATALOG_MSG = `Load Controls offers **five main product categories**:
+
+1. [Pump Load Controls](https://loadcontrols.com/collections/pump-load-controls)
+2. [Compact Motor Power Sensors](https://loadcontrols.com/collections/compact-motor-power-sensor)
+3. [Fast Response Load Controls](https://loadcontrols.com/collections/fast-response-load-control)
+4. [Power Cells](https://loadcontrols.com/collections/power-cell)
+5. [Accessories](https://loadcontrols.com/collections/accessories)
+
+Tell me your application or which category interests you, and I'll help you find the right product.`;
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 export async function handleChatV2(request: Request, env: Env): Promise<Response> {
   if (!env.SUPABASE_URL_V2 || !env.SUPABASE_KEY_V2) {
@@ -463,6 +484,13 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     } catch (e) {
       return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
     }
+  }
+
+  // Catalog / "what products do you have" → fixed pre-generated categories reply
+  if (isCatalogQuery(query)) {
+    const meta = { sources: [], engine: "v2: catalog", rewritten_query: query, product_handles: [] };
+    if (wantStream) return sseResponse(meta, async (send) => { send(CATALOG_MSG); return { finish_reason: "stop", input_tokens: 0, output_tokens: 0 }; });
+    return jsonResponse({ answer: CATALOG_MSG, input_tokens: 0, output_tokens: 0, ...meta });
   }
 
   // §8 rewrite → §9 resolve handles → embed
@@ -510,7 +538,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
 
   // §7 no confident matches → don't hallucinate from weak context
   if (top.length === 0) {
-    const declineText = "I don't have documentation covering that. I can help with Load Controls products, wiring, installation, and settings — try rephrasing or naming the product.";
+    const declineText = "I don't have specific documentation on that. Try rephrasing or naming the product — or reach our team directly at 888-600-3247 or sales@loadcontrols.com and they'll be glad to help.";
     const meta = {
       sources: [], engine: "v2: hybrid+rerank+gemma-4", rewritten_query: rewritten,
       product_handles: handles, debug_max_sim: Math.round(maxSim * 1000) / 1000,

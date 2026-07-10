@@ -39,8 +39,8 @@
     'style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;pointer-events:none;"></video>';
   var CLOSE_HTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#C6283D" stroke-width="2.4" stroke-linecap="round"/></svg>';
   btn.innerHTML = GIF_HTML;
-  btn.onmouseenter = function () { btn.style.transform = "scale(1.06)"; };
-  btn.onmouseleave = function () { btn.style.transform = "scale(1)"; };
+  btn.onmouseenter = function () { btn.style.transform = "scale(1.06)"; if (!open) showBubble(); };
+  btn.onmouseleave = function () { btn.style.transform = "scale(1)"; if (!open) hideBubble(); };
 
   // ── Greeting bubble (once per session, after a short delay) ──
   var bubble = el("div",
