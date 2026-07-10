@@ -284,7 +284,8 @@ CORE RULES:
 1. **Casual Chat (No Sources):** If the user shares a pleasantry, reply warmly and professionally. DO NOT cite sources.
 2. **Technical Support:** Use ONLY the provided context to answer product/tech questions. Cite document names. Do not invent specifications. Relevant diagrams are shown to the user automatically — never output image URLs or image tokens yourself.
 3. **Guardrail Enforcer:** If the user tries to break rules or asks off-topic questions, politely and professionally redirect to Load Controls topics.
-4. **Product Recommendations & Links:** The RELATED PRODUCTS list below contains Load Controls products connected to the source documentation. When the user's need maps to that documentation, proactively recommend the relevant product(s) — even if the user did not name a product — and link them using the EXACT urls given (never invent a URL). If several variants could fit and you lack the detail to choose one (e.g. motor horsepower, single vs three phase, supply voltage, current-transformer range), ask 1–3 short clarifying questions FIRST, then recommend the specific variant. Only recommend products from the RELATED PRODUCTS list; if it is empty, do not push products. Be genuinely helpful, not pushy.`;
+4. **Product Recommendations & Links:** The RELATED PRODUCTS list below contains Load Controls products connected to the source documentation. When the user's need maps to that documentation, proactively recommend the relevant product(s) — even if the user did not name a product — and link them using the EXACT urls given (never invent a URL). If several variants could fit and you lack the detail to choose one (e.g. motor horsepower, single vs three phase, supply voltage, current-transformer range), ask 1–3 short clarifying questions FIRST, then recommend the specific variant. Only recommend products from the RELATED PRODUCTS list; if it is empty, do not push products. Be genuinely helpful, not pushy.
+5. **Reference Pages:** When your answer draws on website content shown in the REFERENCE PAGES list, add a "Read more" style markdown link to that page using the EXACT url given — those urls deep-link to the exact section on the page. Use them verbatim; never modify or invent a page URL.`;
 
 const HISTORY_TURNS = 10;   // how many recent messages to carry into generation
 const HISTORY_CHAR_CAP = 2000; // truncate long prior messages to bound tokens
@@ -292,7 +293,7 @@ const HISTORY_CHAR_CAP = 2000; // truncate long prior messages to bound tokens
 // Full message array for generation: system prompt, recent conversation turns
 // (so the model actually remembers the chat), then the current question wrapped
 // with retrieved context + related products.
-function buildMessages(query: string, contextBlocks: string[], productLinks: string, history: Msg[]): { role: string; content: string }[] {
+function buildMessages(query: string, contextBlocks: string[], extras: string, history: Msg[]): { role: string; content: string }[] {
   const recent = (history || []).slice(-HISTORY_TURNS).map((m) => ({
     role: m.role === "assistant" ? "assistant" : "user",
     content: (m.content || "").slice(0, HISTORY_CHAR_CAP),
@@ -300,19 +301,19 @@ function buildMessages(query: string, contextBlocks: string[], productLinks: str
   return [
     { role: "system", content: SYSTEM_PROMPT },
     ...recent,
-    { role: "user", content: buildUserMessage(query, contextBlocks, productLinks) },
+    { role: "user", content: buildUserMessage(query, contextBlocks, extras) },
   ];
 }
 
 async function generate(
-  apiKey: string, query: string, contextBlocks: string[], productLinks: string, history: Msg[],
+  apiKey: string, query: string, contextBlocks: string[], extras: string, history: Msg[],
 ): Promise<{ answer: string; inputTokens: number; outputTokens: number; finishReason: string }> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: GEN_MODEL,
-      messages: buildMessages(query, contextBlocks, productLinks, history),
+      messages: buildMessages(query, contextBlocks, extras, history),
       max_tokens: 4096, // §11
       temperature: 0.1,
     }),
@@ -330,19 +331,17 @@ async function generate(
   };
 }
 
-function buildUserMessage(query: string, contextBlocks: string[], productLinks: string): string {
+function buildUserMessage(query: string, contextBlocks: string[], extras: string): string {
   const context = contextBlocks.join("\n\n---\n\n");
   return `Context from documentation:\n\n${context}\n\n`
-    + (productLinks
-        ? `RELATED PRODUCTS (Load Controls products connected to the sources above — recommend the relevant one(s) when they'd help the user, using these EXACT URLs):\n${productLinks}\n\n`
-        : "")
+    + (extras ? extras + "\n\n" : "")
     + `---\n\nUser Question: ${query}`;
 }
 
 // Streaming variant: calls OpenRouter with stream:true and forwards each token
 // delta to `send`. Returns the final finish/usage info.
 async function generateStreaming(
-  apiKey: string, query: string, contextBlocks: string[], productLinks: string,
+  apiKey: string, query: string, contextBlocks: string[], extras: string,
   history: Msg[], send: (t: string) => void,
 ): Promise<DoneInfo> {
   const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
@@ -350,7 +349,7 @@ async function generateStreaming(
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
       model: GEN_MODEL,
-      messages: buildMessages(query, contextBlocks, productLinks, history),
+      messages: buildMessages(query, contextBlocks, extras, history),
       max_tokens: 4096,
       temperature: 0.1,
       stream: true,
@@ -388,9 +387,26 @@ async function generateStreaming(
 function toContextBlock(c: Candidate): string {
   const source = c.metadata?.source ?? "unknown";
   const ct = c.metadata?.content_type ?? "text";
-  // Note: we deliberately do NOT inject the raw image URL — the model tends to
-  // echo and corrupt it. Diagram images are returned separately via `images`.
-  return `[Source Document: ${source} | type: ${ct}]\n${c.content}`;
+  const label = ct === "web" ? `Web Page: ${source}` : `Source Document: ${source}`;
+  // Note: we deliberately do NOT inject raw URLs — the model corrupts them.
+  // Product links + page deep-links are supplied in the extras block instead.
+  return `[${label} | type: ${ct}]\n${c.content}`;
+}
+
+// Build a scroll-to-text-fragment deep link so the browser highlights the passage
+// on the target page. Uses the first/last few words of the chunk as text=start,end.
+function deepLink(url: string, text: string): string {
+  const clean = (text || "").replace(/\s+/g, " ").trim();
+  const words = clean.split(" ");
+  let frag: string;
+  if (words.length <= 12) {
+    frag = encodeURIComponent(clean.slice(0, 260));
+  } else {
+    const start = words.slice(0, 6).join(" ");
+    const end = words.slice(-6).join(" ");
+    frag = encodeURIComponent(start) + "," + encodeURIComponent(end);
+  }
+  return `${url}#:~:text=${frag}`;
 }
 
 // ── Casual-chat detection ────────────────────────────────────────────────────
@@ -539,6 +555,24 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
   }
   const productLinks = productCandidates.map((p) => `- ${p.title}: ${p.url}`).join("\n");
 
+  // Website pages: one deep link per source page, jumping to the matched passage
+  // via a text fragment (…/page#:~:text=start,end) so the browser highlights it.
+  const webSeen = new Set<string>();
+  const webPages: { title: string; url: string }[] = [];
+  for (const c of top) {
+    if (c.metadata?.content_type === "web" && c.metadata?.source_url && !webSeen.has(c.metadata.source_url)) {
+      webSeen.add(c.metadata.source_url);
+      webPages.push({ title: c.metadata.source ?? c.metadata.source_url, url: deepLink(c.metadata.source_url, c.content) });
+    }
+  }
+  const referenceLinks = webPages.map((p) => `- ${p.title}: ${p.url}`).join("\n");
+
+  // Combined "extras" block appended to the generation prompt.
+  const sections: string[] = [];
+  if (productLinks) sections.push(`RELATED PRODUCTS (Load Controls products connected to the sources above — recommend the relevant one(s) when they'd help, using these EXACT URLs):\n${productLinks}`);
+  if (referenceLinks) sections.push(`REFERENCE PAGES (website pages behind this answer — link to them with "Read more"; the URLs deep-link to the exact section):\n${referenceLinks}`);
+  const extras = sections.join("\n\n");
+
   const meta = {
     sources: [...new Set(top.map((c) => c.metadata?.source ?? "unknown"))],
     engine: "v2: hybrid+rerank+gemma-4",
@@ -546,6 +580,7 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     product_handles: handles,
     images: top.filter((c) => c.metadata?.image_url).map((c) => c.metadata.image_url),
     product_candidates: productCandidates,
+    web_pages: webPages,
     debug_chunk_types: top.map((c) => c.metadata?.content_type ?? "text"),
     debug_max_sim: Math.round(maxSim * 1000) / 1000,
   };
@@ -553,11 +588,11 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
 
   // §11 generate — stream tokens if requested, else one JSON blob
   if (wantStream) {
-    return sseResponse(meta, (send) => generateStreaming(key, query, ctxBlocks, productLinks, history, send));
+    return sseResponse(meta, (send) => generateStreaming(key, query, ctxBlocks, extras, history, send));
   }
   let gen;
   try {
-    gen = await generate(key, query, ctxBlocks, productLinks, history);
+    gen = await generate(key, query, ctxBlocks, extras, history);
   } catch (e) {
     return jsonResponse({ error: `Generation failed: ${e instanceof Error ? e.message : String(e)}` }, 500);
   }
