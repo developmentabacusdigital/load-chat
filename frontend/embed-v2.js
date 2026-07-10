@@ -93,6 +93,7 @@
   var open = false, loaded = false;
   function setOpen(v) {
     open = v;
+    try { localStorage.setItem("mm-open", v ? "1" : "0"); } catch (e) {}  // remember across pages
     if (v) {
       hideBubble();
       btn.innerHTML = CLOSE_HTML;   // launcher turns into a × while open
@@ -118,6 +119,10 @@
     document.body.appendChild(bubble);
     document.body.appendChild(panel);
     document.getElementById("mm-bubble-x").addEventListener("click", function (ev) { ev.stopPropagation(); hideBubble(); });
+
+    // Keep the chat open across page navigations if it was open (conversation is
+    // restored inside the iframe from its own localStorage).
+    try { if (localStorage.getItem("mm-open") === "1") { setOpen(true); return; } } catch (e) {}
 
     // One-time greeting: 6–10s after the visitor arrives, once per session
     try {

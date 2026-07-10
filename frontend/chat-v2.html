@@ -232,15 +232,32 @@
 
     var ub = addMessage("user"); ub.textContent = q;
     var histForV2 = convo.slice();
-    convo.push({ role: "user", content: q });
+    convo.push({ role: "user", content: q }); saveConvo();
 
     setStatus("thinking");
     var bubble = addMessage("ai");
     var r = await streamReply(bubble, { query: q, history: histForV2, stream: true });
-    if (r.full) convo.push({ role: "assistant", content: r.full });
+    if (r.full) { convo.push({ role: "assistant", content: r.full }); saveConvo(); }
 
     setStatus("idle");
     busy = false; el("send").disabled = false; el("input").focus();
+  }
+
+  // Persist the conversation so it survives page navigation. localStorage is
+  // shared across all pages/tabs of this (iframe) origin, so the chat "follows"
+  // the visitor from page to page.
+  function saveConvo() { try { localStorage.setItem("mm-convo", JSON.stringify(convo.slice(-40))); } catch (e) {} }
+  function restoreConvo() {
+    var raw; try { raw = localStorage.getItem("mm-convo"); } catch (e) { raw = null; }
+    if (!raw) return false;
+    try { convo = JSON.parse(raw) || []; } catch (e) { convo = []; }
+    if (!convo.length) return false;
+    convo.forEach(function (m) {
+      var b = addMessage(m.role === "assistant" ? "ai" : "user");
+      if (m.role === "assistant") renderAnswer(b, m.content, {}, false);
+      else b.textContent = m.content;
+    });
+    return true;
   }
 
   function welcome() {
@@ -249,7 +266,7 @@
   }
 
   el("composer").addEventListener("submit", function (e) { e.preventDefault(); var v = el("input").value; el("input").value = ""; send(v); });
-  el("reset").addEventListener("click", function () { convo = []; el("messages").innerHTML = ""; setStatus("idle"); welcome(); el("input").focus(); });
+  el("reset").addEventListener("click", function () { convo = []; try { localStorage.removeItem("mm-convo"); } catch (e) {} el("messages").innerHTML = ""; setStatus("idle"); welcome(); el("input").focus(); });
 
   // If running inside the embed widget (iframe), enable the in-chat close button
   // and have it ask the parent page to close the panel.
@@ -258,7 +275,7 @@
     try { window.parent.postMessage({ type: "missmomo-close" }, "*"); } catch (e) {}
   });
 
-  welcome();
+  if (!restoreConvo()) welcome();   // resume prior conversation across page navigations
   el("input").focus();
   // wake the database in the background so the first reply isn't delayed by a cold start
   fetch(API + "/warmup").catch(function () {});
