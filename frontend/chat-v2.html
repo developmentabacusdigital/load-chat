@@ -172,6 +172,8 @@
 
   function renderAnswer(bubble, full, meta, streaming) {
     var rendered = (typeof marked !== "undefined") ? marked.parse(full || "") : esc(full || "");
+    // Navigate the whole browser tab (not this iframe) so framed-blocked sites load.
+    rendered = rendered.replace(/<a /g, '<a target="_top" ');
     var html = '<div class="answer">' + rendered + (streaming ? '<span class="cursor">▍</span>' : "") + "</div>";
     if (!streaming) {
       // recommended product cards (only handles the answer actually linked)
@@ -183,7 +185,7 @@
       if (recs.length) {
         html += '<div class="prodcards">';
         recs.forEach(function (c) {
-          html += '<a class="prodcard" href="' + esc(c.url) + '">'
+          html += '<a class="prodcard" href="' + esc(c.url) + '" target="_top">'
             + (c.image ? '<img src="' + esc(c.image) + '" alt="" />'
                        : '<div class="noimg">' + esc((c.title || c.handle).slice(0, 2).toUpperCase()) + '</div>')
             + '<div class="pc-title">' + esc(c.title || c.handle) + '</div></a>';

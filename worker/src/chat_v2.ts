@@ -455,6 +455,24 @@ const CATALOG_MSG = `Load Controls offers **five main product categories**:
 
 Tell me your application or which category interests you, and I'll help you find the right product.`;
 
+// ── Contact intent → fixed reply with phone/email (renders the contact buttons)
+// Anchored so it never matches technical "auxiliary contact"/"relay contact".
+const CONTACT_RE = new RegExp(
+  "\\b(how\\s*(do|can)\\s*(i|we)\\s*(contact|reach|get\\s*in\\s*touch|call|email)|" +
+  "contact\\s*(you|us|load\\s*controls|the\\s*(team|company|sales|support)|details|info|information|number)|" +
+  "get\\s*in\\s*touch|reach\\s*(out|you|us|your\\s*team|someone)|" +
+  "talk\\s*to\\s*(a\\s*)?(person|human|someone|sales|support|rep|representative)|" +
+  "customer\\s*(service|support)|(your|the)\\s*(phone\\s*number|email\\s*address)|sales\\s*(team|department))\\b",
+  "i",
+);
+function isContactQuery(q: string): boolean {
+  return CONTACT_RE.test(q);
+}
+const CONTACT_MSG = `You can reach the Load Controls team directly — they'll be glad to help:
+
+📞 Phone: 888-600-3247
+✉️ Email: sales@loadcontrols.com`;
+
 // ── Handler ──────────────────────────────────────────────────────────────────
 export async function handleChatV2(request: Request, env: Env): Promise<Response> {
   if (!env.SUPABASE_URL_V2 || !env.SUPABASE_KEY_V2) {
@@ -491,6 +509,13 @@ export async function handleChatV2(request: Request, env: Env): Promise<Response
     const meta = { sources: [], engine: "v2: catalog", rewritten_query: query, product_handles: [] };
     if (wantStream) return sseResponse(meta, async (send) => { send(CATALOG_MSG); return { finish_reason: "stop", input_tokens: 0, output_tokens: 0 }; });
     return jsonResponse({ answer: CATALOG_MSG, input_tokens: 0, output_tokens: 0, ...meta });
+  }
+
+  // Contact intent → fixed reply (no retrieval, so no stray diagram matches)
+  if (isContactQuery(query)) {
+    const meta = { sources: [], engine: "v2: contact", rewritten_query: query, product_handles: [] };
+    if (wantStream) return sseResponse(meta, async (send) => { send(CONTACT_MSG); return { finish_reason: "stop", input_tokens: 0, output_tokens: 0 }; });
+    return jsonResponse({ answer: CONTACT_MSG, input_tokens: 0, output_tokens: 0, ...meta });
   }
 
   // §8 rewrite → §9 resolve handles → embed
