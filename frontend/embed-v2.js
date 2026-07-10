@@ -115,19 +115,24 @@
     if (e && e.data && e.data.type === "missmomo-close") setOpen(false);
   });
 
+  // Click anywhere outside the chat (or launcher) closes it. Clicks INSIDE the
+  // chat happen within the iframe and never reach this document, so any event
+  // here while open is genuinely an outside click.
+  document.addEventListener("mousedown", function (e) {
+    if (!open) return;
+    if (btn.contains(e.target) || panel.contains(e.target)) return;
+    setOpen(false);
+  });
+
   function mount() {
     document.body.appendChild(btn);
     document.body.appendChild(bubble);
     document.body.appendChild(panel);
     document.getElementById("mm-bubble-x").addEventListener("click", function (ev) { ev.stopPropagation(); hideBubble(); });
 
-    // Keep the chat open across page navigations if it was open (conversation is
-    // restored inside the iframe from its own localStorage). On phones the panel
-    // is full-screen, so we DON'T auto-reopen there — it would cover the page the
-    // visitor just navigated to; the conversation is still preserved on reopen.
-    try {
-      if (localStorage.getItem("mm-open") === "1" && window.innerWidth > 640) { setOpen(true); return; }
-    } catch (e) {}
+    // The chat starts closed on every page load (navigating = it closes). The
+    // conversation itself is still preserved inside the iframe, so reopening
+    // shows the history.
 
     // One-time greeting: 6–10s after the visitor arrives, once per session
     try {
