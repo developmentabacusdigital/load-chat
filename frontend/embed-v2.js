@@ -121,8 +121,12 @@
     document.getElementById("mm-bubble-x").addEventListener("click", function (ev) { ev.stopPropagation(); hideBubble(); });
 
     // Keep the chat open across page navigations if it was open (conversation is
-    // restored inside the iframe from its own localStorage).
-    try { if (localStorage.getItem("mm-open") === "1") { setOpen(true); return; } } catch (e) {}
+    // restored inside the iframe from its own localStorage). On phones the panel
+    // is full-screen, so we DON'T auto-reopen there — it would cover the page the
+    // visitor just navigated to; the conversation is still preserved on reopen.
+    try {
+      if (localStorage.getItem("mm-open") === "1" && window.innerWidth > 640) { setOpen(true); return; }
+    } catch (e) {}
 
     // One-time greeting: 6–10s after the visitor arrives, once per session
     try {
