@@ -19,7 +19,7 @@
   var cfg = window.MISSMOMO || {};
   var CHAT_URL = cfg.chatUrl || "https://load-chat-ruddy.vercel.app/chat-v2.html";
   var ASSET    = CHAT_URL.replace(/\/[^/]*$/, "");          // directory of the chat page
-  var GIF      = cfg.gif || (ASSET + "/momo-float.gif");
+  var VIDEO    = cfg.video || (ASSET + "/momo-float.mp4");
   var GREETING = cfg.greeting ||
     "Hi, I'm Miss MoMo! 👋 Need help finding the right Load Controls product, wiring, specs, or installation info? Just ask — I'm here to help.";
   var Z = 2147483000;
@@ -35,7 +35,8 @@
     "box-shadow:0 6px 20px rgba(0,0,0,.22);z-index:" + Z + ";transition:transform .15s;");
   btn.id = "mm-btn";
   btn.setAttribute("aria-label", "Chat with Miss MoMo");
-  var GIF_HTML   = '<img src="' + GIF + '" alt="Miss MoMo" style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;" />';
+  var GIF_HTML   = '<video src="' + VIDEO + '" autoplay loop muted playsinline preload="auto" ' +
+    'style="width:100%;height:100%;object-fit:cover;display:block;border-radius:50%;pointer-events:none;"></video>';
   var CLOSE_HTML = '<svg width="26" height="26" viewBox="0 0 24 24" fill="none"><path d="M6 6l12 12M18 6L6 18" stroke="#C6283D" stroke-width="2.4" stroke-linecap="round"/></svg>';
   btn.innerHTML = GIF_HTML;
   btn.onmouseenter = function () { btn.style.transform = "scale(1.06)"; };
