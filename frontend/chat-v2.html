@@ -152,6 +152,14 @@
   function esc(s) { return (s || "").replace(/[&<>]/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]; }); }
   function scrollDown() { var m = el("messages"); m.scrollTop = m.scrollHeight; }
 
+  // Model-number tokens like "PMP-25", "PMP-25-CT200", "PFR-1750" (normalized).
+  // The suffix is captured greedily so "PMP-25-CT200" -> one specific token, not "PMP-25".
+  function modelTokens(s) {
+    return ((s || "").match(/[A-Za-z]{2,5}-?\d{2,4}(?:-[A-Za-z0-9]{1,8})*/g) || [])
+      .map(function (t) { return t.toLowerCase().replace(/[^a-z0-9]/g, ""); })
+      .filter(function (t) { return t.length >= 4; });
+  }
+
   function setStatus(state) {
     var s = el("status"), t = el("statusText"), a = el("headAvatar");
     if (state === "thinking") { s.classList.add("busy"); t.textContent = "Thinking…"; a.src = "Thinking_Momo.gif"; }
@@ -176,11 +184,21 @@
     rendered = rendered.replace(/<a /g, '<a target="_top" ');
     var html = '<div class="answer">' + rendered + (streaming ? '<span class="cursor">▍</span>' : "") + "</div>";
     if (!streaming) {
-      // recommended product cards (only handles the answer actually linked)
+      // Show a product card when the answer LINKS a product OR mentions it by
+      // model name. For a name mention, show only the single canonical product
+      // (shortest handle) so a generic "PMP-25" doesn't flood every variant.
+      var cands = (meta && meta.product_candidates) || [];
       var linked = ((full || "").match(/\/products\/([a-z0-9-]+)/g) || []).map(function (s) { return s.replace("/products/", ""); });
+      var candTok = function (c) { return modelTokens(c.title || "").sort(function (a, b) { return b.length - a.length; })[0]; };
       var seen = {}, recs = [];
-      ((meta && meta.product_candidates) || []).forEach(function (c) {
-        if (linked.indexOf(c.handle) !== -1 && !seen[c.handle]) { seen[c.handle] = 1; recs.push(c); }
+      // 1) explicitly linked products
+      cands.forEach(function (c) { if (linked.indexOf(c.handle) !== -1 && !seen[c.handle]) { seen[c.handle] = 1; recs.push(c); } });
+      // 2) model names mentioned in the answer -> one canonical card each
+      modelTokens(full).forEach(function (tok) {
+        var matches = cands.filter(function (c) { return candTok(c) === tok; });
+        matches.sort(function (a, b) { return (a.handle || "").length - (b.handle || "").length; });
+        var c = matches[0];
+        if (c && !seen[c.handle] && recs.length < 4) { seen[c.handle] = 1; recs.push(c); }
       });
       if (recs.length) {
         html += '<div class="prodcards">';
