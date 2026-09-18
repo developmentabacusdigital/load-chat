@@ -6,7 +6,8 @@ const HF_URL   = process.env.NEXT_PUBLIC_HF_SPACE_URL!
 const HF_TOKEN = process.env.NEXT_PUBLIC_HF_TOKEN!
 
 interface Product { title: string; handle: string; image?: string }
-interface Doc     { source: string; product_handles: string[]; engine?: string }
+interface Doc     { source: string; source_path?: string; source_folder?: string; knowledge_scope?: string; product_name?: string | null; product_handles: string[]; engine?: string }
+interface V3File { file: File; path: string; folder: string }
 type StatusType = 'idle' | 'loading' | 'success' | 'error'
 
 export default function Page() {
@@ -27,18 +28,24 @@ export default function Page() {
   const [addSelected, setAddSelected]   = useState<string[]>([])         // multi-select staging
   const [addSearch, setAddSearch]       = useState('')
   // Which knowledge base the admin is managing: v1 (live) or v2 (A/B project)
-  const [ver, setVer] = useState<'v1' | 'v2'>('v1')
+  const [ver, setVer] = useState<'v1' | 'v2' | 'v3'>('v1')
+  const [v3Files, setV3Files] = useState<V3File[]>([])
+  const v3FileRef = useRef<HTMLInputElement>(null)
   const fileRef  = useRef<HTMLInputElement>(null)
   const dropRef  = useRef<HTMLDivElement>(null)
   const addRef   = useRef<HTMLDivElement>(null)
 
   // Route bases per active version. v1: /documents, /ingest ; v2: /documents/v2, /ingest/v2
-  const docBase    = ver === 'v2' ? '/documents/v2' : '/documents'
-  const ingestPath = ver === 'v2' ? '/ingest/v2' : '/ingest'
+  const docBase    = ver === 'v3' ? '/documents/v3' : ver === 'v2' ? '/documents/v2' : '/documents'
+  const ingestPath = ver === 'v3' ? '/ingest/v3/folder' : ver === 'v2' ? '/ingest/v2' : '/ingest'
 
   useEffect(() => {
     fetch('/api/products').then(r => r.json()).then(setProducts).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (v3FileRef.current) v3FileRef.current.setAttribute('webkitdirectory', '')
+  }, [ver])
 
   // (Re)load documents whenever the active version changes
   useEffect(() => {
@@ -58,8 +65,8 @@ export default function Page() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  function loadDocs(v: 'v1' | 'v2' = ver) {
-    const base = v === 'v2' ? '/documents/v2' : '/documents'
+  function loadDocs(v: 'v1' | 'v2' | 'v3' = ver) {
+    const base = v === 'v3' ? '/documents/v3' : v === 'v2' ? '/documents/v2' : '/documents'
     fetch(`${HF_URL}${base}`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
       .then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
   }
@@ -104,10 +111,64 @@ export default function Page() {
     }
   }
 
+  function selectV3Folder(list: FileList | null) {
+    if (!list) return
+    const files = Array.from(list).map(file => {
+      const path = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name
+      const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+      const folder = parts.length >= 3 ? parts[1] : parts.length === 2 ? parts[0] : ''
+      return { file, path, folder }
+    })
+    setV3Files(files)
+    setStatus({ type: 'idle', msg: '' })
+  }
+
+  async function handleV3Upload() {
+    if (!v3Files.length) return
+    const pdfs = v3Files.filter(x => x.file.name.toLowerCase().endsWith('.pdf'))
+    const folders = Array.from(new Set(pdfs.map(x => x.folder).filter(Boolean)))
+    setUploading(true)
+    setStatus({ type: 'loading', msg: `Preparing ${pdfs.length} PDFs across ${folders.length} folder${folders.length === 1 ? '' : 's'}…` })
+    try {
+      const form = new FormData()
+      const paths: string[] = []
+      for (const item of v3Files) {
+        form.append('files', item.file, item.file.name)
+        paths.push(item.path)
+      }
+      form.append('paths', JSON.stringify(paths))
+      form.append('replace', String(replace))
+
+      const r = await fetch(`${HF_URL}${ingestPath}`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
+        body: form,
+      })
+      const text = await r.text()
+      let data: Record<string, any>
+      try { data = JSON.parse(text) } catch { throw new Error(text.slice(0, 300)) }
+      if (!r.ok) throw new Error(String(data.detail ?? data.error ?? 'V3 folder ingestion failed'))
+
+      const summary = data.summary ?? {}
+      const unsupported = Array.isArray(data.unsupported) ? data.unsupported.length : 0
+      setStatus({
+        type: 'success',
+        msg: `✓ V3 ingested ${summary.pdfs ?? pdfs.length} PDFs · ${summary.chunks_saved ?? 0}/${summary.chunks_total ?? 0} chunks saved${unsupported ? ` · ${unsupported} unsupported file${unsupported === 1 ? '' : 's'} reported` : ''}`,
+      })
+      setV3Files([])
+      if (v3FileRef.current) v3FileRef.current.value = ''
+      loadDocs('v3')
+    } catch (e: unknown) {
+      setStatus({ type: 'error', msg: e instanceof Error ? e.message : 'Unknown error' })
+    } finally {
+      setUploading(false)
+    }
+  }
+
   async function handleDelete(source: string) {
     if (!confirm(`Delete all knowledge from "${source}" (${ver.toUpperCase()})? This cannot be undone.`)) return
     setDeleting(source)
-    await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}`, {
+    await fetch(`${HF_URL}${docBase}/${encodeURIComponent(ver === 'v3' ? (docs.find(d => d.source === source)?.source_path ?? source) : source)}`, {
       method: 'DELETE',
       headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
     })
@@ -187,13 +248,13 @@ export default function Page() {
             <p className="text-xs text-gray-400">Load Controls knowledge base</p>
           </div>
 
-          {/* v1 / v2 knowledge-base toggle */}
+          {/* v1 / v2 / v3 knowledge-base toggle */}
           <div className="ml-auto inline-flex items-center p-0.5 rounded-[8px] border border-[#ebebeb] bg-[#f2f2f2]">
-            {(['v1', 'v2'] as const).map(v => (
+            {(['v1', 'v2', 'v3'] as const).map(v => (
               <button
                 key={v}
                 onClick={() => setVer(v)}
-                title={v === 'v1' ? 'Live project (crnwhln…)' : 'A/B project (bwsqmht…)'}
+                title={v === 'v1' ? 'Live project' : v === 'v2' ? 'A/B project' : 'V3 folder-based OneNote knowledge base'}
                 className={`text-[12px] font-medium px-3 py-1 rounded-[6px] transition-colors ${
                   ver === v ? 'bg-white text-[#171717] shadow-sm' : 'text-[#8f8f8f] hover:text-[#171717]'
                 }`}
@@ -205,6 +266,81 @@ export default function Page() {
         </div>
 
         {/* Upload card */}
+        {ver === 'v3' ? (
+          <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
+            <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold text-gray-800">V3 · Import OneNote Folders</h2>
+                <p className="text-xs text-gray-400 mt-0.5">Folder name is the knowledge identity · PDFs are parsed with Docling + Gemini Embedding 2</p>
+              </div>
+              <span className="text-[11px] font-mono uppercase tracking-wide text-[#8f8f8f] bg-[#f2f2f2] border border-[#ebebeb] px-2 py-1 rounded-[6px]">→ V3 isolated KB</span>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div
+                className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
+                  v3Files.length ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-brand/40 hover:bg-gray-50'
+                }`}
+                onClick={() => v3FileRef.current?.click()}
+                onDragOver={e => e.preventDefault()}
+              >
+                <input
+                  ref={v3FileRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={e => { selectV3Folder(e.target.files); e.target.value = '' }}
+                />
+                {v3Files.length ? (
+                  <div>
+                    <div className="text-3xl mb-2">📁</div>
+                    <div className="text-sm font-semibold text-green-700">{v3Files.length} files selected</div>
+                    <div className="text-xs text-gray-500 mt-1">
+                      {Array.from(new Set(v3Files.map(x => x.folder).filter(Boolean))).length} top-level knowledge folders · {v3Files.filter(x => x.file.name.toLowerCase().endsWith('.pdf')).length} PDFs
+                    </div>
+                    <button
+                      onClick={e => { e.stopPropagation(); setV3Files([]) }}
+                      className="mt-3 text-xs text-gray-500 hover:text-red-500"
+                    >Clear selection</button>
+                  </div>
+                ) : (
+                  <div className="text-gray-400">
+                    <div className="text-3xl mb-2">📂</div>
+                    <div className="text-sm font-medium text-gray-600">Choose the exported OneNote root folder</div>
+                    <div className="text-xs mt-1">Nested PDFs are included automatically · unsupported files are reported</div>
+                  </div>
+                )}
+              </div>
+
+              {v3Files.length > 0 && (
+                <div className="border border-gray-100 rounded-xl overflow-hidden">
+                  <div className="px-4 py-2.5 bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-600">Detected knowledge folders</div>
+                  <div className="max-h-44 overflow-y-auto divide-y divide-gray-100">
+                    {Array.from(new Set(v3Files.map(x => x.folder).filter(Boolean))).sort().map(folder => {
+                      const items = v3Files.filter(x => x.folder === folder)
+                      const pdfCount = items.filter(x => x.file.name.toLowerCase().endsWith('.pdf')).length
+                      return <div key={folder} className="px-4 py-2 flex items-center justify-between text-sm"><span className="font-medium text-gray-700 truncate">{folder}</span><span className="text-xs text-gray-400">{pdfCount} PDF · {items.length - pdfCount} other</span></div>
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex items-center justify-between pt-1">
+                <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
+                  <input type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} className="w-4 h-4 accent-brand rounded" />
+                  Replace matching relative paths
+                </label>
+                <button
+                  onClick={handleV3Upload}
+                  disabled={!v3Files.length || uploading}
+                  className="bg-brand hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors"
+                >{uploading ? 'Processing…' : 'Import Folder'}</button>
+              </div>
+
+              {status.type !== 'idle' && <div className={`text-sm px-4 py-2.5 rounded-lg ${statusColors[status.type]}`}>{status.msg}</div>}
+            </div>
+          </div>
+        ) : (
         <div className="bg-white rounded-2xl border border-gray-200 shadow-sm">
           <div className="px-6 py-4 border-b border-gray-100 rounded-t-2xl flex items-center justify-between">
             <div>
@@ -217,132 +353,27 @@ export default function Page() {
           </div>
 
           <div className="p-6 space-y-4">
-            {/* Drop zone */}
+            {/* Existing V1/V2 upload UI remains unchanged below. */}
             <div
-              className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${
-                dragging  ? 'border-brand bg-brand-light' :
-                file      ? 'border-green-400 bg-green-50' :
-                            'border-gray-200 hover:border-brand/40 hover:bg-gray-50'
-              }`}
-              onDragOver={e => { e.preventDefault(); setDragging(true) }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={onDrop}
-              onClick={() => fileRef.current?.click()}
+              className={`rounded-xl border-2 border-dashed p-8 text-center cursor-pointer transition-all ${dragging ? 'border-brand bg-brand-light' : file ? 'border-green-400 bg-green-50' : 'border-gray-200 hover:border-brand/40 hover:bg-gray-50'}`}
+              onDragOver={e => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)} onDrop={onDrop} onClick={() => fileRef.current?.click()}
             >
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".pdf"
-                className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f); e.target.value = '' }}
-              />
-              {file ? (
-                <div className="flex items-center justify-center gap-3">
-                  <span className="text-3xl">📄</span>
-                  <div className="text-left">
-                    <div className="font-medium text-green-700 text-sm">{file.name}</div>
-                    <div className="text-xs text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</div>
-                  </div>
-                  <button
-                    onClick={e => { e.stopPropagation(); setFile(null) }}
-                    className="ml-2 text-gray-400 hover:text-red-500 text-lg leading-none"
-                  >×</button>
-                </div>
-              ) : (
-                <div className="text-gray-400">
-                  <div className="text-3xl mb-2">📁</div>
-                  <div className="text-sm font-medium text-gray-600">Drop PDF here or click to browse</div>
-                </div>
-              )}
+              <input ref={fileRef} type="file" accept=".pdf" className="hidden" onChange={e => { const f = e.target.files?.[0]; if (f) setFile(f); e.target.value = '' }} />
+              {file ? <div className="flex items-center justify-center gap-3"><span className="text-3xl">📄</span><div className="text-left"><div className="font-medium text-green-700 text-sm">{file.name}</div><div className="text-xs text-gray-400">{(file.size / 1024 / 1024).toFixed(2)} MB</div></div><button onClick={e => { e.stopPropagation(); setFile(null) }} className="ml-2 text-gray-400 hover:text-red-500 text-lg leading-none">×</button></div> : <div className="text-gray-400"><div className="text-3xl mb-2">📁</div><div className="text-sm font-medium text-gray-600">Drop PDF here or click to browse</div></div>}
             </div>
 
-            {/* Product tag selector */}
             <div ref={dropRef} className="relative">
-              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-2">
-                Tag to products {products.length > 0 && <span className="text-gray-300 font-normal normal-case tracking-normal">({products.length} loaded from Shopify)</span>}
-              </label>
-
-              {/* Selected chips */}
-              {selected.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {selected.map(h => {
-                    const p = products.find(p => p.handle === h)
-                    return (
-                      <span key={h} className="inline-flex items-center gap-1 bg-brand-light text-brand text-xs font-semibold px-2.5 py-1 rounded-full">
-                        {p?.title ?? h}
-                        <button onClick={() => toggleHandle(h)} className="hover:text-brand-dark text-sm leading-none ml-0.5">×</button>
-                      </span>
-                    )
-                  })}
-                </div>
-              )}
-
-              <input
-                value={search}
-                onChange={e => { setSearch(e.target.value); setShowDrop(true) }}
-                onFocus={() => setShowDrop(true)}
-                placeholder={products.length ? 'Search products...' : 'No Shopify products — Storefront token not configured'}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand transition-colors"
-              />
-
-              {showDrop && search && filtered.length > 0 && (
-                <div className="absolute z-10 w-full mt-1 border border-gray-200 rounded-xl shadow-lg bg-white max-h-48 overflow-y-auto">
-                  {filtered.map(p => (
-                    <div
-                      key={p.handle}
-                      onMouseDown={() => { toggleHandle(p.handle); setSearch('') }}
-                      className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer text-sm hover:bg-gray-50 ${selected.includes(p.handle) ? 'bg-brand-light/60' : ''}`}
-                    >
-                      <div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                        selected.includes(p.handle) ? 'bg-brand border-brand' : 'border-gray-300'
-                      }`}>
-                        {selected.includes(p.handle) && <span className="text-white text-[10px] leading-none">✓</span>}
-                      </div>
-                      {p.image && <img src={p.image} className="w-7 h-7 rounded object-cover flex-shrink-0" alt="" />}
-                      <span className="text-gray-700 flex-1 truncate">{p.title}</span>
-                      <span className="text-gray-300 text-xs flex-shrink-0">{p.handle}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <label className="text-xs font-semibold text-gray-500 uppercase tracking-wide block mb-2">Tag to products {products.length > 0 && <span className="text-gray-300 font-normal normal-case tracking-normal">({products.length} loaded from Shopify)</span>}</label>
+              {selected.length > 0 && <div className="flex flex-wrap gap-1.5 mb-2">{selected.map(h => { const p = products.find(p => p.handle === h); return <span key={h} className="inline-flex items-center gap-1 bg-brand-light text-brand text-xs font-semibold px-2.5 py-1 rounded-full">{p?.title ?? h}<button onClick={() => toggleHandle(h)} className="hover:text-brand-dark text-sm leading-none ml-0.5">×</button></span> })}</div>}
+              <input value={search} onChange={e => { setSearch(e.target.value); setShowDrop(true) }} onFocus={() => setShowDrop(true)} placeholder={products.length ? 'Search products...' : 'No Shopify products — Storefront token not configured'} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand transition-colors" />
+              {showDrop && search && filtered.length > 0 && <div className="absolute z-10 w-full mt-1 border border-gray-200 rounded-xl shadow-lg bg-white max-h-48 overflow-y-auto">{filtered.map(p => <div key={p.handle} onMouseDown={() => { toggleHandle(p.handle); setSearch('') }} className={`flex items-center gap-2.5 px-3 py-2.5 cursor-pointer text-sm hover:bg-gray-50 ${selected.includes(p.handle) ? 'bg-brand-light/60' : ''}`}><div className={`w-4 h-4 rounded border-2 flex items-center justify-center flex-shrink-0 ${selected.includes(p.handle) ? 'bg-brand border-brand' : 'border-gray-300'}`}>{selected.includes(p.handle) && <span className="text-white text-[10px] leading-none">✓</span>}</div>{p.image && <img src={p.image} className="w-7 h-7 rounded object-cover flex-shrink-0" alt="" />}<span className="text-gray-700 flex-1 truncate">{p.title}</span><span className="text-gray-300 text-xs flex-shrink-0">{p.handle}</span></div>)}</div>}
             </div>
 
-            {/* Options row */}
-            <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600">
-                <input
-                  type="checkbox"
-                  checked={replace}
-                  onChange={e => setReplace(e.target.checked)}
-                  className="w-4 h-4 accent-brand rounded"
-                />
-                Replace if document already exists
-              </label>
-              <button
-                onClick={handleUpload}
-                disabled={!file || uploading}
-                className="bg-brand hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors"
-              >
-                {uploading ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4l3-3-3-3V0a12 12 0 100 24v-4l-3 3 3 3v4A12 12 0 014 12z"/>
-                    </svg>
-                    Processing...
-                  </span>
-                ) : 'Upload & Ingest'}
-              </button>
-            </div>
-
-            {/* Status message */}
-            {status.type !== 'idle' && (
-              <div className={`text-sm px-4 py-2.5 rounded-lg ${statusColors[status.type]}`}>
-                {status.msg}
-              </div>
-            )}
+            <div className="flex items-center justify-between pt-1"><label className="flex items-center gap-2 cursor-pointer text-sm text-gray-600"><input type="checkbox" checked={replace} onChange={e => setReplace(e.target.checked)} className="w-4 h-4 accent-brand rounded" />Replace if document already exists</label><button onClick={handleUpload} disabled={!file || uploading} className="bg-brand hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold px-5 py-2 rounded-lg transition-colors">{uploading ? 'Processing...' : 'Upload & Ingest'}</button></div>
+            {status.type !== 'idle' && <div className={`text-sm px-4 py-2.5 rounded-lg ${statusColors[status.type]}`}>{status.msg}</div>}
           </div>
         </div>
+        )}
 
         {/* Knowledge Base */}
         <div className="bg-white rounded-[12px] border border-[#ebebeb]">
@@ -383,7 +414,7 @@ export default function Page() {
                   <span className="text-lg mt-0.5 flex-shrink-0 opacity-80">📄</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
-                      <div className="font-medium text-[14px] text-[#171717] truncate">{doc.source}</div>
+                      <div className="font-medium text-[14px] text-[#171717] truncate">{ver === 'v3' ? (doc.source_path ?? doc.source) : doc.source}</div>
                       {isSaving && (
                         <svg className="animate-spin w-3.5 h-3.5 text-[#a1a1a1] flex-shrink-0" viewBox="0 0 24 24" fill="none">
                           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
@@ -392,6 +423,13 @@ export default function Page() {
                       )}
                     </div>
 
+                    {ver === 'v3' ? (
+                      <div className="flex flex-wrap items-center gap-2 mt-2">
+                        <span className="text-[11px] font-medium uppercase tracking-wide text-[#8f8f8f] bg-[#f5f5f5] px-2 py-1 rounded">{doc.knowledge_scope ?? 'product'}</span>
+                        {doc.product_name && <span className="text-[12px] text-[#555] truncate">Folder: {doc.product_name}</span>}
+                      </div>
+                    ) : (
+                    <>
                     {/* Connected product previews + add control */}
                     <div className="flex flex-wrap items-center gap-1.5 mt-2">
                       {handles.map(h => {
@@ -487,6 +525,8 @@ export default function Page() {
                         <span className="text-[12px] text-[#a1a1a1]">No products connected</span>
                       )}
                     </div>
+                    </>
+                    )}
                   </div>
 
                   <button

@@ -2,10 +2,11 @@ import os
 import re
 import tempfile
 import httpx
+import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, UploadFile, File, Depends
+from fastapi import FastAPI, UploadFile, File, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 from docling.document_converter import DocumentConverter, PdfFormatOption
@@ -126,6 +127,196 @@ def delete_source(source: str):
         headers=headers,
         timeout=30.0,
     )
+
+
+# ── V3 folder ingestion ───────────────────────────────────────────────────────
+V3_TABLE = "documents_gemini_v3"
+V3_ENGINE = "docling+gemini-embedding-2"
+V3_REFERENCE_FOLDERS = {
+    "acronyms", "price list", "product history", "ref information"
+}
+
+
+def _supabase_headers(prefer: str | None = None) -> dict:
+    headers = {
+        "apikey": SUPABASE_KEY,
+        "Authorization": f"Bearer {SUPABASE_KEY}",
+        "Content-Type": "application/json",
+    }
+    if prefer:
+        headers["Prefer"] = prefer
+    return headers
+
+
+def _safe_relative_path(value: str) -> str:
+    value = (value or "").replace("\\", "/").strip().lstrip("/")
+    parts = [p for p in value.split("/") if p not in ("", ".")]
+    if not parts or any(p == ".." for p in parts):
+        raise HTTPException(400, f"Invalid relative path: {value!r}")
+    return "/".join(parts)
+
+
+def _v3_folder_from_path(relative_path: str) -> str:
+    parts = relative_path.split("/")
+    # Browser directory uploads normally look like RootFolder/Product/file.pdf.
+    # The first directory below the selected root is the authoritative V3 scope.
+    if len(parts) >= 3:
+        return parts[1]
+    if len(parts) == 2:
+        return parts[0]
+    raise HTTPException(400, f"File must be inside a folder: {relative_path}")
+
+
+def _v3_scope(folder: str) -> str:
+    return "reference" if folder.strip().lower() in V3_REFERENCE_FOLDERS else "product"
+
+
+def delete_v3_source(source_path: str):
+    httpx.delete(
+        f"{SUPABASE_URL}/rest/v1/{V3_TABLE}",
+        params={"metadata->>source_path": f"eq.{source_path}"},
+        headers=_supabase_headers(),
+        timeout=30.0,
+    )
+
+
+def save_v3_chunks(chunks: list[str], metadata_base: dict) -> tuple[int, list[str]]:
+    errors = []
+    saved = 0
+    headers = _supabase_headers("return=minimal")
+    for i, chunk in enumerate(chunks):
+        try:
+            embedding = embed_text(chunk)
+            metadata = {
+                **metadata_base,
+                "chunk": i,
+                "engine": V3_ENGINE,
+                "has_image": "data:image" in chunk,
+            }
+            payload = {"content": chunk, "embedding": embedding, "metadata": metadata}
+            r = httpx.post(
+                f"{SUPABASE_URL}/rest/v1/{V3_TABLE}",
+                headers=headers,
+                json=payload,
+                timeout=30.0,
+            )
+            if r.status_code in (200, 201):
+                saved += 1
+            else:
+                errors.append(f"chunk {i}: {r.status_code} {r.text[:160]}")
+        except Exception as exc:
+            errors.append(f"chunk {i}: {type(exc).__name__}: {str(exc)[:160]}")
+    return saved, errors
+
+
+@app.post("/ingest/v3/folder")
+async def ingest_v3_folder(
+    files: list[UploadFile] = File(...),
+    paths: str = "[]",
+    replace: bool = True,
+):
+    """Ingest a browser-selected OneNote export folder recursively.
+
+    V3 uses the folder structure as knowledge identity and writes only to the
+    isolated documents_gemini_v3 table. It does not require Shopify tagging.
+    """
+    try:
+        relative_paths = json.loads(paths)
+    except json.JSONDecodeError:
+        raise HTTPException(400, "paths must be a JSON array")
+
+    if not isinstance(relative_paths, list) or len(relative_paths) != len(files):
+        raise HTTPException(400, "paths must contain one relative path per uploaded file")
+
+    results = []
+    totals = {"files": 0, "pdfs": 0, "unsupported": 0, "chunks_saved": 0, "chunks_total": 0}
+    unsupported = []
+
+    for upload, raw_path in zip(files, relative_paths):
+        relative_path = _safe_relative_path(str(raw_path))
+        folder = _v3_folder_from_path(relative_path)
+        filename = Path(relative_path).name
+        totals["files"] += 1
+
+        if not filename.lower().endswith(".pdf"):
+            totals["unsupported"] += 1
+            unsupported.append({"path": relative_path, "reason": "unsupported file type"})
+            continue
+
+        totals["pdfs"] += 1
+        source_path = relative_path
+        source_scope = _v3_scope(folder)
+        contents = await upload.read()
+        if not contents:
+            results.append({"source_path": source_path, "folder": folder, "status": "error", "error": "empty file"})
+            continue
+
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(contents)
+            tmp_path = Path(tmp.name)
+
+        try:
+            if replace:
+                delete_v3_source(source_path)
+            md = parse_pdf(tmp_path)
+            chunks = chunk_markdown(md)
+            metadata_base = {
+                "source": filename,
+                "source_path": source_path,
+                "source_folder": folder,
+                "knowledge_scope": source_scope,
+                "product_name": None if source_scope == "reference" else folder,
+                "product_handles": [],
+                "content_type": "text",
+                "kb_version": "v3",
+            }
+            saved, errors = save_v3_chunks(chunks, metadata_base)
+            totals["chunks_saved"] += saved
+            totals["chunks_total"] += len(chunks)
+            results.append({
+                "source_path": source_path,
+                "folder": folder,
+                "chunks_total": len(chunks),
+                "chunks_saved": saved,
+                "errors": errors,
+                "status": "ok" if not errors else "partial",
+            })
+        except Exception as exc:
+            results.append({"source_path": source_path, "folder": folder, "status": "error", "error": str(exc)[:300]})
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+    return {"version": "v3", "summary": totals, "unsupported": unsupported, "files": results}
+
+
+@app.get("/documents/v3")
+def list_v3_documents():
+    rows = httpx.get(
+        f"{SUPABASE_URL}/rest/v1/{V3_TABLE}?select=metadata&metadata->>chunk=eq.0&metadata->>kb_version=eq.v3&order=id.asc",
+        headers=_supabase_headers(),
+        timeout=30.0,
+    )
+    rows.raise_for_status()
+    docs = []
+    for row in rows.json():
+        m = row.get("metadata", {})
+        docs.append({
+            "source": m.get("source"),
+            "source_path": m.get("source_path"),
+            "source_folder": m.get("source_folder"),
+            "knowledge_scope": m.get("knowledge_scope"),
+            "product_name": m.get("product_name"),
+            "product_handles": m.get("product_handles", []),
+            "engine": m.get("engine"),
+        })
+    return docs
+
+
+@app.delete("/documents/v3/{source_path:path}")
+def delete_v3_document(source_path: str):
+    source_path = _safe_relative_path(source_path)
+    delete_v3_source(source_path)
+    return {"deleted": source_path, "version": "v3"}
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 @app.get("/health")
