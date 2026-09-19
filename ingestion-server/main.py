@@ -212,8 +212,8 @@ def save_v3_chunks(chunks: list[str], metadata_base: dict) -> tuple[int, list[st
 @app.post("/ingest/v3/folder")
 async def ingest_v3_folder(
     files: list[UploadFile] = File(...),
-    paths: str = "[]",
-    replace: bool = True,
+    paths: str = Form("[]"),
+    replace: bool = Form(True),
 ):
     """Ingest a browser-selected OneNote export folder recursively.
 

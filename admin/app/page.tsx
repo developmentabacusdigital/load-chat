@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const HF_URL   = process.env.NEXT_PUBLIC_HF_SPACE_URL!
-const HF_TOKEN = process.env.NEXT_PUBLIC_HF_TOKEN!
+
 
 interface Product { title: string; handle: string; image?: string }
 interface Doc     { source: string; source_path?: string; source_folder?: string; knowledge_scope?: string; product_name?: string | null; product_handles: string[]; engine?: string }
@@ -67,7 +66,7 @@ export default function Page() {
 
   function loadDocs(v: 'v1' | 'v2' | 'v3' = ver) {
     const base = v === 'v3' ? '/documents/v3' : v === 'v2' ? '/documents/v2' : '/documents'
-    fetch(`${HF_URL}${base}`, { headers: { 'Authorization': `Bearer ${HF_TOKEN}` } })
+    fetch(`/api/kb${base}`)
       .then(r => r.json()).then(d => setDocs(Array.isArray(d) ? d : [])).catch(() => {})
   }
 
@@ -91,9 +90,8 @@ export default function Page() {
       form.append('file', file)
       form.append('product_handles', selected.join(','))
       form.append('replace', String(replace))
-      const r    = await fetch(`${HF_URL}${ingestPath}`, {
+      const r    = await fetch(`/api/kb${ingestPath}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
         body: form,
       })
       const text = await r.text()
@@ -139,9 +137,8 @@ export default function Page() {
       form.append('paths', JSON.stringify(paths))
       form.append('replace', String(replace))
 
-      const r = await fetch(`${HF_URL}${ingestPath}`, {
+      const r = await fetch(`/api/kb${ingestPath}`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
         body: form,
       })
       const text = await r.text()
@@ -168,9 +165,8 @@ export default function Page() {
   async function handleDelete(source: string) {
     if (!confirm(`Delete all knowledge from "${source}" (${ver.toUpperCase()})? This cannot be undone.`)) return
     setDeleting(source)
-    await fetch(`${HF_URL}${docBase}/${encodeURIComponent(ver === 'v3' ? (docs.find(d => d.source === source)?.source_path ?? source) : source)}`, {
+    await fetch(`/api/kb${docBase}/${encodeURIComponent(ver === 'v3' ? (docs.find(d => d.source === source)?.source_path ?? source) : source)}`, {
       method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${HF_TOKEN}` },
     })
     setDeleting(null)
     loadDocs()
@@ -182,9 +178,9 @@ export default function Page() {
     const prev = docs.find(d => d.source === source)?.product_handles ?? []
     setDocs(ds => ds.map(d => d.source === source ? { ...d, product_handles: handles } : d))
     try {
-      const r = await fetch(`${HF_URL}${docBase}/${encodeURIComponent(source)}/products`, {
+      const r = await fetch(`/api/kb${docBase}/${encodeURIComponent(source)}/products`, {
         method: 'PATCH',
-        headers: { 'Authorization': `Bearer ${HF_TOKEN}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ product_handles: handles }),
       })
       if (!r.ok) throw new Error((await r.text()).slice(0, 200))
