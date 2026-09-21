@@ -173,23 +173,49 @@ async function handleChat(
     throw new Error(`Embed failed: ${msg}`);
   }
 
-  // 2. Retrieve relevant chunks from documents_gemini table
-  const rpcName = "match_documents_gemini";
-  let chunks: { content: string; source: string; similarity: number }[];
+  // 2. Retrieve from both legacy V1/V2 KB and V3 KB
+  let legacyChunks: { content: string; source: string; similarity: number }[];
+  let v3Chunks: { content: string; source: string; similarity: number }[];
+
   try {
-    chunks = await retrieveChunks(
-      env.SUPABASE_URL,
-      env.SUPABASE_KEY,
-      queryEmbedding,
-      rpcName,
-      5
+    [legacyChunks, v3Chunks] = await Promise.all([
+      retrieveChunks(
+        env.SUPABASE_URL,
+        env.SUPABASE_KEY,
+        queryEmbedding,
+        "match_documents_gemini",
+        5
+      ),
+      retrieveChunks(
+        env.SUPABASE_URL,
+        env.SUPABASE_KEY,
+        queryEmbedding,
+        "match_documents_gemini_v3",
+        5
+      ),
+    ]);
+
+    console.log(
+      "[Step 2] Supabase retrieve OK:",
+      "legacy =", legacyChunks.length,
+      "v3 =", v3Chunks.length
     );
-    console.log("[Step 2] Supabase retrieve OK, chunks:", chunks.length);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     console.error("[Step 2 FAILED] Supabase retrieve error:", msg);
     throw new Error(`Supabase retrieve failed: ${msg}`);
   }
+
+  // Merge both knowledge bases and keep the strongest matches.
+  const chunks = [...legacyChunks, ...v3Chunks]
+    .sort((a, b) => b.similarity - a.similarity)
+    .slice(0, 8);
+
+  console.log(
+    "[Step 2] Combined retrieval:",
+    chunks.length,
+    "chunks"
+  );
 
   if (chunks.length === 0) {
     return jsonResponse({
